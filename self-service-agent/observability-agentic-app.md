@@ -214,32 +214,32 @@ env:
 
 ## Collect the tracing with an all-in-one Jaeger server
 
-One option to see the spans we’ve produced in the previous sections is just deploying an all-in-one Jager server instance in a given $(NAMESPACE).
+One way to visualize the spans we've produced in the previous sections is to deploy an all-in-one Jaeger server instance in a specific namespace.
 
-In the following we'll present a way to deploy on a Kubernetes cluster, for any doubts please see the [Jaeger Getting Started guide](https://www.jaegertracing.io/docs/2.14/getting-started/).
+Below we'll show you how to deploy Jaeger on a Kubernetes cluster. For more information, please refer to the [Jaeger Getting Started guide](https://www.jaegertracing.io/docs/2.14/getting-started/).
 
-Deploy the server instance, for instance 
+Deploy the server instance:
 
 ```shell
 kubectl create deployment jaeger --image=cr.jaegertracing.io/jaegertracing/jaeger:2.12.0 -n $NAMESPACE || echo "Deployment already exists"
 ```
 
-Add some labels that will be used later to define the network policy to expose the route to the Jaeger UI:
+Add labels to the deployment. These labels will be used by the network policy to control access to the Jaeger UI:
 
 ```shell
 kubectl label deployment jaeger -n $NAMESPACE \
 		app.kubernetes.io/instance=self-service-agent \
 		app.kubernetes.io/name=self-service-agent \
 		--overwrite || true
-```    
+```
 
-and
+Also add the same labels to the pod template within the deployment:
 
 ```shell
 kubectl patch deployment jaeger -n $NAMESPACE --type=json -p='[{"op":"add","path":"/spec/template/metadata/labels/app.kubernetes.io~1instance","value":"self-service-agent"},{"op":"add","path":"/spec/template/metadata/labels/app.kubernetes.io~1name","value":"self-service-agent"}]' || true
 ```
 
-Create the network policy that will be used by the route to the Jaeger UI:
+Create a network policy to allow ingress traffic to the Jaeger UI:
 
 ```shell
 printf '%s\n' \
@@ -269,47 +269,47 @@ printf '%s\n' \
   | kubectl apply -f - || echo "Network policy creation failed, may already exist"
 ```
 
-Create the Jaeger query UI service:
+Create a service to expose the Jaeger query UI:
 
 ```shell
 kubectl expose deployment jaeger --port=16686 --name=jaeger-ui -n $NAMESPACE || echo "Service already exists"
 ```
 
-Create the Jaeger collector service for collecting spans using HTTP protocol:
+Create a service for the Jaeger collector to receive spans via HTTP:
 
 ```shell
 kubectl expose deployment jaeger --port=4318 --name=jaeger-otlp-http -n $NAMESPACE || echo "OTLP HTTP service already exists"
 ```
 
-Optionally, create the Jaeger collector service for collecting spans using gGRP protocol:
+Optionally, create a service for the Jaeger collector to receive spans via gRPC:
 
 ```shell
 kubectl expose deployment jaeger --port=4317 --name=jaeger-otlp-grpc -n $NAMESPACE || echo "OTLP gRPC service already exists"
 ```
 
-Finally, create the route:
+Finally, create an OpenShift route to access the Jaeger UI from outside the cluster:
 
 ```shell
 oc create route edge jaeger-ui --service=jaeger-ui -n $NAMESPACE || echo "Route already exists"
 ```
 
-To use the server as collector, on the sender pods you can set:
+To configure your application pods to send traces to this Jaeger collector, set the following environment variable:
 
 ```shell
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger-otlp-http.$NAMESPACE.svc.cluster.local:4318"
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger-otlp-http.$NAMESPACE.svc.cluster.local:4318
 ```
 
-The collector will be accessible within the OpenShift cluster only.
+Note that the collector is only accessible from within the OpenShift cluster.
 
-In the following you can find some traces produced by the [It-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent):
+Below are some example traces produced by the [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent):
 
 ![alt_text](images/image2.png "image_tooltip")
 
-Also a graph view:
+Here's the same data shown in a graph view:
 
 ![alt_text](images/image3.png "image_tooltip")
 
-You can notice that the structure may be quite involved, for instance a tipical request several nested calls. For instance:
+As you can see, the trace structure can be quite complex. A typical request includes several nested calls, as shown in this example:
 
 ```
 http.request POST /api/v1/requests (request-manager)          [120ms]
