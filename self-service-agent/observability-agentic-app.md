@@ -212,6 +212,115 @@ env:
   {{- end }}
 ```
 
-## Configure Jaeger OTEL collector
+## Collect the tracing with an all-in-one Jaeger server
 
-_Note: This section appears to be incomplete in the original document. You may want to add content here about configuring the Jaeger OTEL collector._
+One option to see the spans we’ve produced in the previous sections is just deploying an all-in-one Jager server instance in a given $(NAMESPACE).
+
+In the following we'll present a way to deploy on a Kubernetes cluster, for any doubts please see the [Jaeger Getting Started guide](https://www.jaegertracing.io/docs/2.14/getting-started/).
+
+Deploy the server instance, for instance 
+
+```shell
+kubectl create deployment jaeger --image=cr.jaegertracing.io/jaegertracing/jaeger:2.12.0 -n $NAMESPACE || echo "Deployment already exists"
+```
+
+Add some labels that will be used later to define the network policy to expose the route to the Jaeger UI:
+
+```shell
+kubectl label deployment jaeger -n $NAMESPACE \
+		app.kubernetes.io/instance=self-service-agent \
+		app.kubernetes.io/name=self-service-agent \
+		--overwrite || true
+```    
+
+and
+
+```shell
+kubectl patch deployment jaeger -n $NAMESPACE --type=json -p='[{"op":"add","path":"/spec/template/metadata/labels/app.kubernetes.io~1instance","value":"self-service-agent"},{"op":"add","path":"/spec/template/metadata/labels/app.kubernetes.io~1name","value":"self-service-agent"}]' || true
+```
+
+Create the network policy that will be used by the route to the Jaeger UI:
+
+```shell
+printf '%s\n' \
+  'apiVersion: networking.k8s.io/v1' \
+  'kind: NetworkPolicy' \
+  'metadata:' \
+  '  name: jaeger-allow-ingress' \
+  "  namespace: $NAMESPACE" \
+  '  labels:' \
+  '    app: jaeger' \
+  'spec:' \
+  '  podSelector:' \
+  '    matchLabels:' \
+  '      app.kubernetes.io/instance: self-service-agent' \
+  '      app.kubernetes.io/name: self-service-agent' \
+  '      app: jaeger' \
+  '  policyTypes:' \
+  '  - Ingress' \
+  '  ingress:' \
+  '  - from:' \
+  '    - namespaceSelector:' \
+  '        matchLabels:' \
+  '          network.openshift.io/policy-group: ingress' \
+  '    ports:' \
+  '    - protocol: TCP' \
+  '      port: 16686' \
+  | kubectl apply -f - || echo "Network policy creation failed, may already exist"
+```
+
+Create the Jaeger query UI service:
+
+```shell
+kubectl expose deployment jaeger --port=16686 --name=jaeger-ui -n $NAMESPACE || echo "Service already exists"
+```
+
+Create the Jaeger collector service for collecting spans using HTTP protocol:
+
+```shell
+kubectl expose deployment jaeger --port=4318 --name=jaeger-otlp-http -n $NAMESPACE || echo "OTLP HTTP service already exists"
+```
+
+Optionally, create the Jaeger collector service for collecting spans using gGRP protocol:
+
+```shell
+kubectl expose deployment jaeger --port=4317 --name=jaeger-otlp-grpc -n $NAMESPACE || echo "OTLP gRPC service already exists"
+```
+
+Finally, create the route:
+
+```shell
+oc create route edge jaeger-ui --service=jaeger-ui -n $NAMESPACE || echo "Route already exists"
+```
+
+To use the server as collector, on the sender pods you can set:
+
+```shell
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger-otlp-http.$NAMESPACE.svc.cluster.local:4318"
+```
+
+The collector will be accessible within the OpenShift cluster only.
+
+In the following you can find some traces produced by the [It-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent):
+
+![alt_text](images/image2.png "image_tooltip")
+
+Also a graph view:
+
+![alt_text](images/image3.png "image_tooltip")
+
+You can notice that the structure may be quite involved, for instance a tipical request several nested calls. For instance:
+
+```
+http.request POST /api/v1/requests (request-manager)          [120ms]
+  └─ publish_event agent.request (request-manager)            [10ms]
+      └─ http.request POST /agent/chat (agent-service)        [95ms]
+          ├─ knowledge_base_query laptop-refresh-policy       [15ms]
+          ├─ http.request POST /inference/chat (llamastack)   [65ms]
+          │   └─ mcp.tool.get_employee_laptop_info            [8ms]
+          │       └─ http.request GET servicenow.com/api      [6ms]
+          └─ http.request POST /inference/chat (llamastack)   [12ms]
+              └─ mcp.tool.open_laptop_refresh_ticket          [8ms]
+                  └─ http.request POST servicenow.com/api     [6ms]
+```
+
