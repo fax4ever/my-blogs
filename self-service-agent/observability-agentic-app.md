@@ -324,20 +324,20 @@ http.request POST /api/v1/requests (request-manager)          [120ms]
                   └─ http.request POST servicenow.com/api     [6ms]
 ```
 
-In this example, the overall request time is dominated by the LLM inference call, that is pretty common for an agentic application.
+In this example, the overall request time is dominated by the LLM inference call, which is typical for agentic applications.
 
 ## Collect the tracing with the OpenShift Distributed Tracing Platform
 
-The solution we described in the previous chapter is more suitable for a test / development environment.
-For production we reccomand to collect the tracing using the [OpenShift Distributed Tracing Platform](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/distributed_tracing/distr-tracing-rn), configuring the collector following the [OpenShift documentation for configuring the collector](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/red_hat_build_of_opentelemetry/configuring-the-collector). In the following we'll give an idea of the process.
+The solution we described in the previous section is more suitable for a test or development environment.
+For production, we recommend collecting traces using the [OpenShift Distributed Tracing Platform](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/distributed_tracing/distr-tracing-rn), configuring the collector following the [OpenShift documentation for configuring the collector](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/red_hat_build_of_opentelemetry/configuring-the-collector). In the following sections, we'll provide an overview of the process.
 
-First of all, this time we want to collect the tracing globally in the OpenShift main console and not a dedicated project / namespace. Since the console is unique for entire cluster, tracing data may come from multiple tenants.
+Unlike the previous approach, we want to collect traces globally in the OpenShift main console rather than in a dedicated project or namespace. Since the console is unique for the entire cluster, tracing data may come from multiple tenants.
 
 You can access traces directly through the OpenShift console under `Observe > Traces`.
 
 ![alt_text](images/image4.png "image_tooltip")
 
-The mask allows to filter tracing spans by different criteria: tenants, service name, namespace, status, span or trace durantion, custom attributes or according to a given time range.
+The interface allows you to filter tracing spans by different criteria: tenants, service name, namespace, status, span or trace duration, custom attributes, or according to a given time range.
 
 This view provides:
 
@@ -349,8 +349,8 @@ This view provides:
 ![alt_text](images/image5.png "image_tooltip")
 
 The observability services are usually deployed in a dedicated namespace on the OpenShift platform.
-In this example we image we choosen the name 'observability-hub'.
-In this namespace we've defined an otel-collector resource like the following:
+In this example, we use the name 'observability-hub'.
+In this namespace, we've defined an OpenTelemetry Collector resource as follows:
 
 ``` yaml
 apiVersion: opentelemetry.io/v1beta1
@@ -398,7 +398,7 @@ spec:
           insecure: false
           ca_file: /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
         auth:
-          authenticator: bearertokenauth    
+          authenticator: bearertokenauth
 
     service:
       extensions:
@@ -420,19 +420,19 @@ spec:
 
 The custom resource type `opentelemetry.io/v1beta1.OpenTelemetryCollector` is managed by the **Red Hat build of OpenTelemetry Operator**. This operator is available through OpenShift's Operator Lifecycle Manager (OLM) and can be installed from the `redhat-operators` catalog. The operator handles the deployment, configuration, and lifecycle management of OpenTelemetry Collector instances based on the `OpenTelemetryCollector` custom resource definitions.
 
-The operator will create a service in the same namespace, using the name we provided in the resource, `otel-collector` in this example. The hostname should be used to fill the `OTEL_EXPORTER_OTLP_ENDPOINT` variable in all the pods need to export the tracing.
+The operator creates a service in the same namespace using the name specified in the resource (`otel-collector` in this example). Use the service hostname to set the `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable in all pods that need to export traces.
 
-In our case will be:
+In our case, the endpoint is:
 
 ```shell
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector-collector.observability-hub.svc.cluster.local:4318
 ```
 
-In the `OpenTelemetryCollector` under the config specification it is possible to specify all the [OpenTelemetry standard components](https://opentelemetry.io/docs/collector/components/), such as receivers to collect telemetry data from various sources and formats, processors to transform, filter, and enrich telemetry data or exporters to send telemetry data to observability backends.
+In the `OpenTelemetryCollector` resource, the `config` specification allows you to specify all the [OpenTelemetry standard components](https://opentelemetry.io/docs/collector/components/), such as receivers to collect telemetry data from various sources and formats, processors to transform, filter, and enrich telemetry data, or exporters to send telemetry data to observability backends.
 
-Other specifications are provided for instance to enable an external route to the collector service and to speficity the service account used to access to the service. Usually a cluster role is binded to a specific service account, in order to selectivly allow the services to send the tracing data to the collector. Please look at [the official documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/red_hat_build_of_opentelemetry/configuring-the-collector) to configure the collector properly on your OpenShift platform.
+Other specifications are provided, for instance, to enable an external route to the collector service and to specify the service account used to access the service. Usually, a cluster role is bound to a specific service account to selectively allow services to send trace data to the collector. Please refer to [the official documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/red_hat_build_of_opentelemetry/configuring-the-collector) to configure the collector properly on your OpenShift platform.
 
-In the configuration we are exporting the tracing to a Tempo Stack gateway, that has been installed using another custom resource of kind `tempo.grafana.com/v1alpha1.TempoStack` defined in the same 'observability-hub' namespace:
+In this configuration, we export traces to a Tempo Stack gateway, which has been installed using another custom resource of kind `tempo.grafana.com/v1alpha1.TempoStack` defined in the same 'observability-hub' namespace:
 
 ```yaml
 apiVersion: tempo.grafana.com/v1alpha1
@@ -466,15 +466,15 @@ spec:
       enabled: true
     queryFrontend:
       jaegerQuery:
-        # we're using the OpenShift console as for querying tracing data
+        # we're using the OpenShift console for querying tracing data
         enabled: false
 ```
 
-Once the resource is added to the `observability-hub` namespace, the `Tempo Operator` will create the service gateway and all the infrastructure to collect the tracing data, and persist it for instance on S3 MinIO storage. For more information see [Distributed Tracing documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/distributed_tracing/index).
+Once the resource is added to the `observability-hub` namespace, the Tempo Operator creates the service gateway and all the infrastructure to collect trace data, and persists it, for instance, on S3 MinIO storage. For more information, see the [Distributed Tracing documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/distributed_tracing/index).
 
-The last step is to use the OpenShift observability UI plugin to see the tracing data on the OpenShift console. Choosing `UI Plugin` tab on the `Cluster Observability Operator` page, as explained in the [Cluster Observability Operator documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_cluster_observability_operator/1-latest/html/ui_plugins_for_red_hat_openshift_cluster_observability_operator/distributed-tracing-ui-plugin).
+The last step is to use the OpenShift observability UI plugin to view trace data in the OpenShift console. Select the `UI Plugin` tab on the `Cluster Observability Operator` page, as explained in the [Cluster Observability Operator documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_cluster_observability_operator/1-latest/html/ui_plugins_for_red_hat_openshift_cluster_observability_operator/distributed-tracing-ui-plugin).
 
-If you want go deeper in the configuration of the observability intrastructure on the OpenShift platform, there is [this other quickstart project](https://github.com/rh-ai-quickstart/lls-observability) that shown in great detail all the reccomanded options that you have at the moment.
+If you want to go deeper into the configuration of the observability infrastructure on the OpenShift platform, there is [this other quickstart project](https://github.com/rh-ai-quickstart/lls-observability) that shows in great detail all the recommended options available at the moment.
 
 
 
