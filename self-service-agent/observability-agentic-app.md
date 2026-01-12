@@ -174,6 +174,7 @@ In our project, we added these instrumentation libraries to all modules that use
 
 In the quickstart components we imported the following dependencies:
 
+Adapted from `tracing-config/pyproject.toml`:
 
 ```
     "opentelemetry-exporter-otlp-proto-http==1.37.0",
@@ -188,6 +189,7 @@ When using autoinstrumentation, we typically define environment variables that m
 
 For instance, in our project's autoinstrumented components, we set the following variables:
 
+Adapted from `helm/templates/_service-deployment.tpl`:
 
 ```
 ENV OTEL_SERVICE_NAME=${SERVICE_NAME}
@@ -200,6 +202,7 @@ In particular, we used the presence of `OTEL_EXPORTER_OTLP_ENDPOINT` to programm
 
 Context must be propagated when calls are made across components in the quickstart. To propagate the context in order to follow the causality in the span correlation we used the following code:
 
+Adapted from `tracing-config/src/tracing_config/auto_tracing.py`:
 
 ```
 from opentelemetry.propagate import set_global_textmap
@@ -212,6 +215,7 @@ set_global_textmap(TraceContextTextMapPropagator())
 
 To enable the HTTPX client autoinstrumentation:
 
+Adapted from `tracing-config/src/tracing_config/auto_tracing.py`:
 
 ```
 # Set up instrumentations
@@ -221,6 +225,7 @@ HTTPXClientInstrumentor().instrument()
 
 To enable the FastAPI instrumentation:
 
+Adapted from `request-manager/src/request_manager/main.py` and similar service main files:
 
 ```
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
@@ -246,6 +251,7 @@ Manual instrumentation should remain consistent with automatic instrumentation. 
 
 Here is a code example inspired by the solution we implemented in the [It-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent):
 
+Adapted from `mcp-servers/snow/src/snow/tracing.py`:
 
 ```
 from opentelemetry.propagate import extract
@@ -293,6 +299,7 @@ In the Llama Stack configuration, we define the telemetry to include the OTEL ex
 
 For Llama Stack 0.2.x series, we can define the telemetry as follows:
 
+Adapted from Helm values passed to the `llama-stack` subchart (configured in `helm/values.yaml`):
 
 ```
 telemetry:
@@ -312,6 +319,7 @@ telemetry:
 
 For Llama Stack 0.3.x series, we only need to set the environment variables:
 
+Adapted from Helm values passed to the `llama-stack` subchart (configured in `helm/values.yaml`):
 
 ```
 env:
@@ -509,6 +517,7 @@ In this example, we use the name 'observability-hub'.
 
 In this namespace, we've defined an OpenTelemetry Collector resource as follows:
 
+Example OpenTelemetry Collector configuration for the observability-hub namespace:
 
 ```
 apiVersion: opentelemetry.io/v1beta1
@@ -595,6 +604,7 @@ Other specifications are provided, for instance, to enable an external route to 
 
 In this configuration, we export traces to a Tempo Stack gateway, which has been installed using another custom resource of kind `tempo.grafana.com/v1alpha1.TempoStack` defined in the same 'observability-hub' namespace:
 
+Example TempoStack configuration for the observability-hub namespace:
 
 ```
 apiVersion: tempo.grafana.com/v1alpha1
