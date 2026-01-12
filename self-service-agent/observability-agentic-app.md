@@ -78,13 +78,88 @@ In the first part of this article, we will explain how to produce tracing spans 
 
 In this post  tracing is configured following the OpenTelemetry version 1.37.0, but of course different versions may be used. For more information on the standard, see the [OpenTelemetry page.](https://opentelemetry.io/) In this post examples are in Python,   however OpenTelemetry libraries are available for most any popular programming languages.
 
-Open Telemetry
+
+## Open Telemetry
+
+OpenTelemetry is an open-source observability framework that provides a unified set of APIs, libraries, and instrumentation to capture distributed traces, metrics, and logs from applications. It emerged from the merger of OpenTracing and OpenCensus projects in 2019 and has since become the de facto standard for application observability across the industry.
+
+The key advantages of OpenTelemetry include:
+
+* **Vendor neutrality**: Instrument your code once and export telemetry data to any compatible backend (Jaeger, Tempo, Zipkin, commercial solutions, etc.)
+* **Broad language support**: Official SDKs available for all major programming languages including Python, Java, Go, JavaScript, and many others
+* **Automatic instrumentation**: Many popular frameworks and libraries offer auto-instrumentation, reducing the amount of custom code needed
+* **Context propagation**: Built-in mechanisms to maintain trace context across service boundaries, essential for distributed systems
+* **Active ecosystem**: Strong community support, regular updates, and backing from major cloud providers and observability vendors
+
+For agentic applications with their complex, multi-component architectures—involving routing agents, specialist agents, LLM inference, MCP servers, and external integrations—distributed tracing becomes essential. OpenTelemetry allows us to trace requests end-to-end across these heterogeneous components, correlating spans to understand the complete execution flow and identify performance bottlenecks.
+
+In the sections that follow, we'll demonstrate how to instrument various components of an agentic application using OpenTelemetry, both through automatic instrumentation where available and manual instrumentation where necessary.
 
 
 ## Context Propagation
 
+The it-self-service-agent quickstart demonstrates a realistic production architecture for agentic applications, consisting of multiple loosely-coupled services communicating via events. Understanding how requests flow through this system is essential for effective observability.
+
+### Architecture Components
+
+The quickstart deploys the following main components:
+
+**Request Manager**: The central entry point that normalizes incoming requests from multiple channels (Slack, email, CLI, webhooks, web UI) into a standardized format. It manages conversation sessions in PostgreSQL and publishes CloudEvents to initiate agent processing.
+
+**Agent Service**: The AI orchestration engine that routes requests between a routing agent and specialist agents (laptop refresh, privacy impact assessment, RFP generation, etc.). It manages agent sessions using LangGraph state machines, coordinates LLM inference through Llama Stack, retrieves relevant information from knowledge bases, and invokes external tools through MCP servers.
+
+**Integration Dispatcher**: Handles bidirectional communication with external channels, routing agent responses back to users via their original communication channel with appropriate formatting.
+
+**Llama Stack**: Provides LLM inference endpoints for agent reasoning, manages tool calling and function execution, and supports vector database operations for knowledge base retrieval.
+
+**MCP Servers**: Model Context Protocol servers that provide tools for integrating with external systems. For example, the ServiceNow MCP server exposes tools to query employee laptop information and create refresh tickets.
+
+**Eventing Layer**: Routes CloudEvents between services. In testing mode, this uses a lightweight Mock Eventing Service for simple HTTP routing. In production mode, it uses Knative Eventing with Apache Kafka for reliable, durable message delivery.
+
+### The Challenge of Distributed Tracing
+
+A single user request in this architecture typically traverses multiple service boundaries asynchronously:
+
+1. User sends message via Slack
+2. Integration Dispatcher receives webhook and forwards to Request Manager
+3. Request Manager creates/updates session and publishes CloudEvent
+4. Eventing layer routes event to Agent Service
+5. Agent Service processes request, possibly invoking:
+   - Llama Stack for LLM inference (multiple times)
+   - Knowledge base queries for domain information
+   - MCP server tool calls to external systems
+6. Agent Service publishes response CloudEvent
+7. Eventing layer routes to Integration Dispatcher
+8. Integration Dispatcher sends formatted response back to Slack
+
+Without proper context propagation, each service would create isolated, disconnected spans. We would see individual operations in our tracing backend but lose the causal relationships that show which operations triggered which downstream calls.
+
+### How Context Propagation Works
+
+OpenTelemetry solves this through **trace context propagation** using the W3C Trace Context standard. Each trace is assigned a unique trace ID that remains constant across all services involved in processing that request. As calls cross service boundaries, the trace context (containing the trace ID and parent span ID) is transmitted along with the request, allowing downstream services to continue the trace rather than starting a new, disconnected one.
+
+The propagation mechanism works through a simple extract-and-inject pattern:
+
+**Extract**: When a service receives an incoming request, it extracts the trace context from the request metadata. This context contains the trace ID and parent span information that allows the service to understand where it fits in the overall request flow.
+
+**Inject**: When that same service makes an outbound call to another service, it injects the current trace context into the outbound request metadata, allowing the receiving service to continue the trace.
+
+This propagation pattern ensures that when we view a trace in Jaeger or the OpenShift console, we see the complete end-to-end request flow with proper parent-child relationships between spans, even across asynchronous service boundaries. As we'll see in the examples later in this post, a typical trace shows all components working together—from the initial HTTP request through multiple agent interactions, LLM inference calls, knowledge base queries, and MCP tool invocations—all correlated under a single trace ID.
+
 
 ## Instrumenting Llama Stack
+
+One of the significant advantages of OpenTelemetry's widespread adoption is that many modern frameworks, libraries, and platforms now include built-in observability support. Rather than requiring manual instrumentation of every operation, these systems provide native OpenTelemetry integration that can be enabled through simple configuration.
+
+Llama Stack is an excellent example of this approach. As a critical component in our agentic architecture—responsible for LLM inference, tool calling, and knowledge base operations—proper tracing of Llama Stack interactions is essential for understanding agent behavior and performance. Fortunately, Llama Stack includes native OpenTelemetry telemetry support that integrates seamlessly with the broader tracing infrastructure.
+
+When a framework provides native OpenTelemetry support, several advantages emerge. Instead of manually creating spans for each operation, configuring attributes, and managing context propagation, you simply enable tracing through configuration settings while the framework handles all instrumentation details internally. Framework maintainers understand their system's internals and can instrument at the appropriate granularity, capturing relevant operations with meaningful attributes and maintaining consistent naming conventions across releases. Native support also ensures that trace context flows correctly through the framework's internal operations—when Llama Stack makes inference calls or executes tool invocations, the trace context automatically propagates to child operations without requiring application-level intervention. Perhaps most importantly, as the framework evolves, its instrumentation evolves with it, ensuring that new features automatically include appropriate tracing without requiring updates to your instrumentation code.
+
+In the it-self-service-agent quickstart, enabling Llama Stack tracing requires minimal configuration. The framework supports multiple telemetry sinks where trace data can be exported, including console logging, SQLite storage for local inspection, and OpenTelemetry trace export for integration with distributed tracing backends. For our purposes, we configure Llama Stack to export traces to our OpenTelemetry collector using the `otel_trace` sink.
+
+Once configured, Llama Stack automatically produces spans for all its major operations. Each LLM chat completion or generation request creates a span with relevant attributes like model name, token counts, and sampling parameters. When the LLM invokes tools through Llama Stack, each tool call is traced as a child span including the tool name and parameters. Vector database operations for RAG (Retrieval Augmented Generation) are captured with query details and retrieval results, providing visibility into the knowledge retrieval process that augments the LLM's responses.
+
+These spans integrate seamlessly with the spans we create in our application services, appearing as child spans under the agent service operations that invoke Llama Stack. When viewing a complete trace, you can see exactly how much time was spent in LLM inference versus tool execution versus knowledge retrieval—critical insights for optimizing agent performance. The specific configuration details for Llama Stack vary slightly between the 0.2.x and 0.3.x release series, which we'll cover in detail in the "Llama Stack tracing configuration" section later in this post.
 
 
 ## Autoinstrumentation: HTTP Clients and FastAPI
