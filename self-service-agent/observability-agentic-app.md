@@ -5,7 +5,7 @@ You have some errors, warnings, or alerts. If you are using reckless mode, turn 
 * WARNINGs: 0
 * ALERTS: 5
 
-Conversion time: 2.49 seconds.
+Conversion time: 2.2 seconds.
 
 
 Using this Markdown file:
@@ -18,7 +18,7 @@ Using this Markdown file:
 Conversion notes:
 
 * Docs™ to Markdown version 2.0β1
-* Wed Jan 14 2026 06:21:12 GMT-0800 (PST)
+* Wed Jan 14 2026 08:27:04 GMT-0800 (PST)
 * Source doc: Debugging Autonomy: Advanced Observability for a Self-Service IT Agent
 * Tables are currently converted to HTML tables.
 * This document has images: check for >>>>>  gd2md-html alert:  inline image link in generated source and store images to your server. NOTE: Images in exported zip file from Google Docs may not appear in  the same order as they do in your doc. Please check the images!
@@ -45,9 +45,9 @@ Agentic applications typically involve complex interactions between multiple com
 
 In this blog post, we will describe in detail a practical approach to setting up distributed tracing for an agentic workflow, based on lessons learned while developing the [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent) quickstart.
 
-By the end of this journey, you will have configured OpenTelemetry support for distributed tracing across all typical agentic application components, enabling you to track requests end-to-end through application workloads, MCP Servers, and Llama Stack. By integrating with OpenShift's observability stack, you'll gain unified monitoring across all platform components alongside your existing infrastructure metrics.
+By the end of this journey, you will understand how to configure OpenTelemetry support for distributed tracing across all typical agentic application components, enabling you to track requests end-to-end through application workloads, MCP Servers, and Llama Stack.
 
-Red Hat AI quickstarts are a catalog of ready-to-run industry-specific use cases for your Red Hat AI environment. Each quickstart is designed to be simple to deploy, explore, and extend. They give teams a fast, hands-on way to see how AI can power solutions on enterprise-ready, open source infrastructure. You can read more about quickstarts in "AI Quickstarts: an easy and practical way to get started with Red Hat AI" and the it-self-service-agent in particular in  <span style="text-decoration:underline;">An introduction to the Self Service Agent - laptop refresh quickstart</span>.
+AI quickstarts are a catalog of ready-to-run industry-specific use cases for your Red Hat AI environment. Each quickstart is designed to be simple to deploy, explore, and extend. They give teams a fast, hands-on way to see how AI can power solutions on enterprise-ready, open source infrastructure. You can read more about quickstarts in "AI Quickstarts: an easy and practical way to get started with Red Hat AI" and the it-self-service-agent in particular in  <span style="text-decoration:underline;">An introduction to the Self Service Agent - laptop refresh quickstart</span>.
 
 This is the sixth post in a series covering what we learned while developing the it-self-service-agent quickstart, which will be as follows:
 
@@ -107,17 +107,14 @@ The [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-
 
 The quickstart deploys the following main components:
 
-**Request Manager**: The central entry point that normalizes incoming requests from multiple channels (Slack, email, CLI, webhooks, web UI) into a standardized format. It manages conversation sessions in PostgreSQL and publishes CloudEvents to initiate agent processing.
 
-**Agent Service**: The AI orchestration engine that routes requests between a routing agent and specialist agents (laptop refresh, privacy impact assessment, RFP generation, etc.). It manages agent sessions using LangGraph state machines, coordinates LLM inference through Llama Stack, retrieves relevant information from knowledge bases, and invokes external tools through MCP servers.
 
-**Integration Dispatcher**: Handles bidirectional communication with external channels, routing agent responses back to users via their original communication channel with appropriate formatting.
-
-**Llama Stack**: Provides LLM inference endpoints for agent reasoning, manages tool calling and function execution, and supports vector database operations for knowledge base retrieval.
-
-**MCP Servers**: Model Context Protocol servers that provide tools for integrating with external systems. For example, the ServiceNow MCP server exposes tools to query employee laptop information and create refresh tickets.
-
-**Eventing Layer**: Routes CloudEvents between services. In testing mode, this uses a lightweight Mock Eventing Service for simple HTTP routing. In production mode, it uses Knative Eventing with Apache Kafka for reliable, durable message delivery.
+* **Request Manager**: The central entry point that normalizes incoming requests from multiple channels (Slack, email, CLI, webhooks, web UI) into a standardized format.
+* **Agent Service**: The AI orchestration engine that routes requests between a routing agent and specialist agents (laptop refresh, privacy impact assessment, RFP generation, etc.).
+* **Integration Dispatcher**: Handles bidirectional communication with external channels, routing agent responses back to users via their original communication channel with appropriate formatting.
+* **Llama Stack**: Provides LLM inference endpoints for agent reasoning, manages tool calling and function execution, and supports vector database operations for knowledge base retrieval.
+* **MCP Servers**: Model Context Protocol servers that provide tools for integrating with external systems.
+* **Eventing Layer**: Routes CloudEvents between services. 
 
 
 ### The Challenge of Distributed Tracing
@@ -143,15 +140,25 @@ Without proper context propagation, each service would create isolated, disconne
 
 ### How Context Propagation Works
 
-OpenTelemetry solves this through *trace context propagation* using the W3C Trace Context standard. Each trace is assigned a unique trace ID that remains constant across all services involved in processing that request. As calls cross service boundaries, the trace context (containing the trace ID and parent span ID) is transmitted along with the request, allowing downstream services to continue the trace rather than starting a new, disconnected one.
+OpenTelemetry solves this through *trace context propagation* using the [W3C Trace Context](https://www.w3.org/TR/trace-context/) standard. Each trace is assigned a unique trace ID that remains constant across all services involved in processing that request. As calls cross service boundaries, the trace context (containing the trace ID and parent span ID in the format version-traceid-spanid-sampled ) is transmitted along with the request, allowing downstream services to continue the trace rather than starting a new, disconnected one.
+
+This is an example of a trace and span ID injected as an additional HTTP header:
+
+
+```
+traceparent: 00-1e9a84a8c5ae45c30b1305a0f41ed275-215435bcec6efa72-00
+```
+
 
 The propagation mechanism works through a simple extract-and-inject pattern:
 
-**Extract**: When a service receives an incoming request, it extracts the trace context from the request metadata. This context contains the trace ID and parent span information that allows the service to understand where it fits in the overall request flow.
+**Extract**: When a service receives an incoming request, it extracts the trace context from the request metadata.
 
 **Inject**: When that same service makes an outbound call to another service, it injects the current trace context into the outbound request metadata, allowing the receiving service to continue the trace.
 
-This propagation pattern ensures that when we view a trace in Jaeger or the OpenShift console, we see the complete end-to-end request flow with proper parent-child relationships between spans, even across asynchronous service boundaries. As we'll see in the examples later in this post, a typical trace shows all components working together—from the initial HTTP request through multiple agent interactions, LLM inference calls, knowledge base queries, and MCP tool invocations—all correlated under a single trace ID.
+This propagation pattern ensures that when we view a trace in Jaeger or the OpenShift console, we see the complete end-to-end request flow with proper parent-child relationships between spans, even across asynchronous service boundaries. 
+
+As we'll see in the examples later in this post, a typical trace shows all components working together—from the initial HTTP request through multiple agent interactions, LLM inference calls, knowledge base queries, and MCP tool invocations—all correlated under a single trace ID.
 
 
 ## Instrumenting Llama Stack
@@ -175,7 +182,7 @@ The [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-
 
 The OpenTelemetry spans we want to capture typically depend on the frameworks used in the components. For instance, in the [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent) application, much of the communication between workloads is implemented as REST API calls. We want to capture these calls in our tracing, producing a span for each invocation while maintaining the causal relationships between them.
 
-Whenever a library supports auto-instrumentation, we should take advantage of it. For example, we used the [OpenTelemetry instrumentation HTTPx](https://pypi.org/project/opentelemetry-instrumentation-httpx/) and [OpenTelemetry FastAPI Instrumentation](https://opentelemetry-python-contrib.readthedocs.io/en/latest/instrumentation/fastapi/fastapi.html) libraries to instrument all REST server and client requests and responses within the quickstart. This approach produces spans for all calls without requiring potentially error-prone custom code. Additionally, causality and span correlations are automatically handled by these libraries, eliminating the need to manually pass context from parent calls to child calls.
+Whenever a library supports auto-instrumentation, we should take advantage of it. For example, we used the [OpenTelemetry instrumentation HTTPx](https://pypi.org/project/opentelemetry-instrumentation-httpx/) and [OpenTelemetry FastAPI Instrumentation](https://opentelemetry-python-contrib.readthedocs.io/en/latest/instrumentation/fastapi/fastapi.html) libraries to instrument all REST server and client requests and responses within the quickstart. This approach produces spans for all calls without requiring potentially error-prone custom code. In addition,  context propagation is handled by these libraries, eliminating the need to manually pass context from parent calls to child calls.
 
 In our project, we added these instrumentation libraries to all modules that use the frameworks, along with the base libraries for the OpenTelemetry APIs, SDK, and exporter.
 
@@ -248,18 +255,11 @@ FastAPIInstrumentor.instrument_app(app)
 
 
 
-### Passing OTEL properties to multiple workloads
-
-[It-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent) is deployed as a single Helm application, so tracing is configured globally using HELM values that are automatically propagated to all workloads.
-
-For instance, if the HELM value `otelExporter` is set, all workloads will set the environment variable `OTEL_EXPORTER_OTLP_ENDPOINT` to the same value, enabling tracing export to the same OTEL collector globally.
-
-
 ## Manual Instrumentation: MCP Servers
 
 For some libraries such as FastMCP, we didn't find any viable auto-instrumentation solution at the time of development. Therefore, we opted for manual instrumentation to trace MCP server calls.
 
-Manual instrumentation requires careful attention to detail to ensure that manually created spans integrate seamlessly with automatically instrumented spans. The key challenge is maintaining proper trace context propagation—ensuring that manually created spans correctly identify their parent spans and that child operations (including automatically instrumented HTTP calls) continue the trace correctly.
+Manual instrumentation requires that we ensure that manually created spans integrate with automatically instrumented spans. The key challenge is maintaining proper trace context propagation—ensuring that manually created spans correctly identify their parent spans and that child operations (including automatically instrumented HTTP calls) continue the trace correctly.
 
 
 ### Setting Up Manual Instrumentation
@@ -296,13 +296,11 @@ tracer = trace.get_tracer(__name__, "1.0.0")
 
 ### Context Extraction and Span Creation
 
-The most critical aspect of manual instrumentation is correctly extracting the parent trace context from incoming requests. This ensures that your manually created spans appear as children of the appropriate parent span in the trace, maintaining the causal relationship between operations.
+One of the key aspects of manual instrumentation is correctly extracting the parent trace context from incoming requests. This ensures that your manually created spans appear as children of the appropriate parent span in the trace, maintaining the causal relationship between operations.
 
-When an MCP server receives a tool invocation request, the trace context (if present) is transmitted in HTTP headers. The W3C Trace Context standard specifies that trace context is carried in the `traceparent` header. We extract this context and use it as the parent when creating our span:
+When an MCP server receives a tool invocation request, the trace context (if present) is transmitted in HTTP headers. As covered earlier, the W3C Trace Context standard specifies that trace context is carried in the `traceparent` header. We extract this from the context and use it as the parent when creating our span:
 
-Here is a code example inspired by the solution we implemented in the [It-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent):
-
-*Adapted from [mcp-servers/snow/src/snow/tracing.py](tracing.py):*
+Here is a code example *adapted from [mcp-servers/snow/src/snow/tracing.py](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/mcp-servers/snow/src/snow/tracing.py):*
 
 
 ```
@@ -495,102 +493,9 @@ logger.debug(
 
 ## Collect the tracing with an all-in-one Jaeger server
 
-One way to visualize the spans we've produced in the previous sections is to deploy an all-in-one Jaeger server instance in a specific namespace.
+One way to visualize the spans we've produced in the previous sections is to deploy an all-in-one Jaeger server instance you can do with through podman with something like:
 
-Below we'll show you how to deploy Jaeger on a Kubernetes cluster. For more information, please refer to the [Jaeger Getting Started guide](https://www.jaegertracing.io/docs/2.14/getting-started/).
-
-Deploy the server instance:
-
-
-```
-kubectl create deployment jaeger --image=cr.jaegertracing.io/jaegertracing/jaeger:2.12.0 -n $NAMESPACE || echo "Deployment already exists"
-```
-
-
-Add labels to the deployment. These labels will be used by the network policy to control access to the Jaeger UI:
-
-
-```
-kubectl label deployment jaeger -n $NAMESPACE \
-		app.kubernetes.io/instance=self-service-agent \
-		app.kubernetes.io/name=self-service-agent \
-		--overwrite || true
-```
-
-
-Also add the same labels to the pod template within the deployment:
-
-
-```
-kubectl patch deployment jaeger -n $NAMESPACE --type=json -p='[{"op":"add","path":"/spec/template/metadata/labels/app.kubernetes.io~1instance","value":"self-service-agent"},{"op":"add","path":"/spec/template/metadata/labels/app.kubernetes.io~1name","value":"self-service-agent"}]' || true
-```
-
-
-Create a network policy to allow ingress traffic to the Jaeger UI:
-
-
-```
-printf '%s\n' \
-  'apiVersion: networking.k8s.io/v1' \
-  'kind: NetworkPolicy' \
-  'metadata:' \
-  '  name: jaeger-allow-ingress' \
-  "  namespace: $NAMESPACE" \
-  '  labels:' \
-  '    app: jaeger' \
-  'spec:' \
-  '  podSelector:' \
-  '    matchLabels:' \
-  '      app.kubernetes.io/instance: self-service-agent' \
-  '      app.kubernetes.io/name: self-service-agent' \
-  '      app: jaeger' \
-  '  policyTypes:' \
-  '  - Ingress' \
-  '  ingress:' \
-  '  - from:' \
-  '    - namespaceSelector:' \
-  '        matchLabels:' \
-  '          network.openshift.io/policy-group: ingress' \
-  '    ports:' \
-  '    - protocol: TCP' \
-  '      port: 16686' \
-  | kubectl apply -f - || echo "Network policy creation failed, may already exist"
-```
-
-
-Create a service to expose the Jaeger query UI:
-
-
-```
-kubectl expose deployment jaeger --port=16686 --name=jaeger-ui -n $NAMESPACE || echo "Service already exists"
-```
-
-
-Optionally, create a service for the Jaeger collector to receive spans via gRPC:
-
-
-```
-kubectl expose deployment jaeger --port=4317 --name=jaeger-otlp-grpc -n $NAMESPACE || echo "OTLP gRPC service already exists"
-```
-
-
-Finally, create an OpenShift route to access the Jaeger UI from outside the cluster:
-
-
-```
-oc create route edge jaeger-ui --service=jaeger-ui -n $NAMESPACE || echo "Route already exists"
-```
-
-
-To configure your application pods to send traces to this Jaeger collector, set the following environment variable:
-
-
-```
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger-otlp-http.$NAMESPACE.svc.cluster.local:4318
-```
-
-
-Note that the collector is only accessible from within the OpenShift cluster.
+In the  [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent) we have also included a make target called jaeger-deploy that can be used to deploy an instance of Jaeger in the same namespace as the quickstart. For more details on a simple Jaeger deployment please refer to the [Jaeger Getting Started guide](https://www.jaegertracing.io/docs/2.14/getting-started/).
 
 Below are some example traces produced by the [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent).
 
@@ -669,145 +574,9 @@ This view provides:
 ![alt_text](images/image5.png "image_tooltip")
 
 
-The observability services are usually deployed in a dedicated namespace on the OpenShift platform.
-
-In this example, we use the name 'observability-hub'.
-
-In this namespace, we've defined an OpenTelemetry Collector resource as follows:
-
-Example OpenTelemetry Collector configuration for the observability-hub namespace:
-
-
-```
-apiVersion: opentelemetry.io/v1beta1
-kind: OpenTelemetryCollector
-metadata:
-  name: otel-collector
-spec:
-  serviceAccount: otel-collector
-  mode: deployment
-  upgradeStrategy: automatic
-  ingress:
-    route:
-      termination: passthrough
-    type: route
-  config:
-    extensions:
-      bearertokenauth:
-        filename: "/var/run/secrets/kubernetes.io/serviceaccount/token"
-
-    receivers:
-      otlp:
-        protocols:
-          grpc:
-            endpoint: 0.0.0.0:4317
-          http:
-            endpoint: 0.0.0.0:4318
-
-    processors:
-      batch:
-        send_batch_size: 100
-        timeout: 1s
-      memory_limiter:
-        check_interval: 5s
-        limit_percentage: 95
-        spike_limit_percentage: 25
-
-    exporters:
-      debug:
-        verbosity: basic
-      otlphttp/dev:
-        endpoint: https://tempo-tempostack-gateway.observability-hub.svc.cluster.local:8080/api/traces/v1/dev
-        headers:
-          X-Scope-OrgID: dev
-        tls:
-          insecure: false
-          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
-        auth:
-          authenticator: bearertokenauth
-
-    service:
-      extensions:
-        - bearertokenauth
-      pipelines:
-        traces:
-          receivers:
-            - otlp
-          processors:
-            - batch
-            - memory_limiter
-          exporters:
-            - debug
-            - otlphttp/dev
-      telemetry:
-        metrics:
-          address: 0.0.0.0:8888
-```
-
-
 The custom resource type `opentelemetry.io/v1beta1.OpenTelemetryCollector` is managed by the **Red Hat build of OpenTelemetry Operator**. This operator is available through OpenShift's Operator Lifecycle Manager (OLM) and can be installed from the `redhat-operators` catalog. The operator handles the deployment, configuration, and lifecycle management of OpenTelemetry Collector instances based on the `OpenTelemetryCollector` custom resource definitions.
 
-The operator creates a service in the same namespace using the name specified in the resource (`otel-collector` in this example). Use the service hostname to set the `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable in all pods that need to export traces.
-
-In our case, the endpoint is:
-
-
-```
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector-collector.observability-hub.svc.cluster.local:4318
-```
-
-
-In the `OpenTelemetryCollector` resource, the `config` specification allows you to specify all the [OpenTelemetry standard components](https://opentelemetry.io/docs/collector/components/), such as receivers to collect telemetry data from various sources and formats, processors to transform, filter, and enrich telemetry data, or exporters to send telemetry data to observability backends.
-
-Other specifications are provided, for instance, to enable an external route to the collector service and to specify the service account used to access the service. Usually, a cluster role is bound to a specific service account to selectively allow services to send trace data to the collector. Please refer to [the official documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/red_hat_build_of_opentelemetry/configuring-the-collector) to configure the collector properly on your OpenShift platform.
-
-In this configuration, we export traces to a Tempo Stack gateway, which has been installed using another custom resource of kind `tempo.grafana.com/v1alpha1.TempoStack` defined in the same 'observability-hub' namespace:
-
-*Example TempoStack configuration for the observability-hub namespace:*
-
-
-```
-apiVersion: tempo.grafana.com/v1alpha1
-kind: TempoStack
-metadata:
-  name: tempostack
-  namespace: observability-hub
-  labels:
-    app.kubernetes.io/component: tempo
-    app.kubernetes.io/instance: tempo
-    app.kubernetes.io/name: tempo-stack
-    app.kubernetes.io/part-of: observability
-spec:
-  storage:
-    secret:
-      name: minio-tempo
-      type: s3
-  storageSize: 15Gi
-  resources:
-    total:
-      limits:
-        cpu: '5'
-        memory: 10Gi
-  tenants:
-    mode: openshift
-    authentication:
-      - tenantId: 1610b0c3-c509-4592-a256-a1871353dbfa
-        tenantName: dev
-  template:
-    gateway:
-      enabled: true
-    queryFrontend:
-      jaegerQuery:
-        # we're using the OpenShift console for querying tracing data
-        enabled: false
-```
-
-
-Once the resource is added to the `observability-hub` namespace, the Tempo Operator creates the service gateway and all the infrastructure to collect trace data, and persists it, for instance, on S3 MinIO storage. For more information, see the [Distributed Tracing documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/distributed_tracing/index).
-
-The last step is to use the OpenShift observability UI plugin to view trace data in the OpenShift console. Select the `UI Plugin` tab on the `Cluster Observability Operator` page, as explained in the [Cluster Observability Operator documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_cluster_observability_operator/1-latest/html/ui_plugins_for_red_hat_openshift_cluster_observability_operator/distributed-tracing-ui-plugin).
-
-If you want to go deeper into the configuration of the observability infrastructure on the OpenShift platform, there is [this other quickstart project](https://github.com/rh-ai-quickstart/lls-observability) that shows in great detail all the recommended options available at the moment.
+The  [lls-observability quickstart](https://github.com/rh-ai-quickstart/lls-observability/blob/main/helm/02-observability/otel-collector/otel-collector.yaml), provides the full details on how to deploy the OpenShift Distributed Tracing Platform.
 
 
 ## Next steps
