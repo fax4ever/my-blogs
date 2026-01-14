@@ -5,7 +5,7 @@ You have some errors, warnings, or alerts. If you are using reckless mode, turn 
 * WARNINGs: 0
 * ALERTS: 5
 
-Conversion time: 2.767 seconds.
+Conversion time: 2.49 seconds.
 
 
 Using this Markdown file:
@@ -18,7 +18,7 @@ Using this Markdown file:
 Conversion notes:
 
 * Docs™ to Markdown version 2.0β1
-* Wed Jan 14 2026 05:57:16 GMT-0800 (PST)
+* Wed Jan 14 2026 06:21:12 GMT-0800 (PST)
 * Source doc: Debugging Autonomy: Advanced Observability for a Self-Service IT Agent
 * Tables are currently converted to HTML tables.
 * This document has images: check for >>>>>  gd2md-html alert:  inline image link in generated source and store images to your server. NOTE: Images in exported zip file from Google Docs may not appear in  the same order as they do in your doc. Please check the images!
@@ -181,7 +181,7 @@ In our project, we added these instrumentation libraries to all modules that use
 
 In the quickstart components we imported the following dependencies:
 
-*Adapted from `tracing-config/pyproject.toml`:*
+*Adapted from [tracing-config/pyproject.toml](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/tracing-config/pyproject.toml):*
 
 
 ```
@@ -197,7 +197,7 @@ When using autoinstrumentation, we typically define environment variables that m
 
 For instance, in our project's autoinstrumented components, we set the following variables:
 
-*Adapted from `helm/templates/_service-deployment.tpl`:*
+*Adapted from [helm/templates/_service-deployment.tpl](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/helm/templates/_service-deployment.tpl):*
 
 
 ```
@@ -211,7 +211,7 @@ In particular, we used the presence of `OTEL_EXPORTER_OTLP_ENDPOINT` to programm
 
 Context must be propagated when calls are made across components in the quickstart. To propagate the context in order to follow the causality in the span correlation we used the following code:
 
-*Adapted from `tracing-config/src/tracing_config/auto_tracing.py`:*
+*Adapted from [tracing-config/src/tracing_config/auto_tracing.py](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/tracing-config/src/tracing_config/auto_tracing.py):*
 
 
 ```
@@ -225,7 +225,7 @@ set_global_textmap(TraceContextTextMapPropagator())
 
 To enable the HTTPX client autoinstrumentation:
 
-*Adapted from `request-manager/src/request_manager/main.py` and similar service main files:*
+*Adapted from [request-manager/src/request_manager/main.py](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/request-manager/src/request_manager/main.py) and similar service main files:*
 
 
 ```
@@ -236,7 +236,7 @@ HTTPXClientInstrumentor().instrument()
 
 To enable the FastAPI instrumentation:
 
-*Adapted from `request-manager/src/request_manager/main.py` and similar service main files:*
+*Adapted from [request-manager/src/request_manager/main.py](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/request-manager/src/request_manager/main.py) and similar service main files:*
 
 
 ```
@@ -266,7 +266,7 @@ Manual instrumentation requires careful attention to detail to ensure that manua
 
 Before creating spans manually, you need to initialize the OpenTelemetry tracer. This setup is typically done once at module initialization:
 
-*Adapted from `mcp-servers/snow/src/snow/tracing.py`:*
+*Adapted from [mcp-servers/snow/src/snow/tracing.py](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/mcp-servers/snow/src/snow/tracing.py):*
 
 
 ```
@@ -302,7 +302,7 @@ When an MCP server receives a tool invocation request, the trace context (if pre
 
 Here is a code example inspired by the solution we implemented in the [It-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent):
 
-*Adapted from `mcp-servers/snow/src/snow/tracing.py`:*
+*Adapted from [mcp-servers/snow/src/snow/tracing.py](tracing.py):*
 
 
 ```
@@ -384,7 +384,7 @@ with tracer.start_as_current_span(span_name, context=parent_context) as span:
 
 To make manual instrumentation less intrusive, we wrap MCP tool functions with a decorator that handles all the tracing logic:
 
-*Adapted from `mcp-servers/snow/src/snow/[tracing.py](tracing.py)`:*
+*Adapted from [mcp-servers/snow/src/snow/tracing.py](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/mcp-servers/snow/src/snow/tracing.py):*
 
 
 ```
@@ -430,7 +430,7 @@ In the Llama Stack configuration, we define the telemetry to include the OTEL ex
 
 For Llama Stack 0.2.x series, we can define the telemetry as follows:
 
-*Adapted from Helm values passed to the `llama-stack` subchart (configured in `helm/values.yaml`):*
+*Adapted from Helm values passed to the `llama-stack` subchart (configured in [helm/values.yaml](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/helm/values.yaml)):*
 
 
 ```
@@ -451,7 +451,7 @@ telemetry:
 
 For Llama Stack 0.3.x series, we only need to set the environment variables:
 
-*Adapted from Helm values passed to the `llama-stack` subchart (configured in `helm/values.yaml`*):
+*Adapted from Helm values passed to the `llama-stack` subchart (configured in [helm/values.yaml](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/helm/values.yaml)*):
 
 
 ```
@@ -474,7 +474,7 @@ According to our research, in at least Llama Stack 0.2.x and 0.3.x, the span con
 
 Therefore, we needed to manually inject the parent tracing context in the HTTP headers when making requests to MCP servers.
 
-*Adapted from `agent-service/src/agent_service/langgraph/responses_agent.py`:*
+*Adapted from [agent-service/src/agent_service/langgraph/responses_agent.py](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/agent-service/src/agent_service/langgraph/responses_agent.py):*
 
 
 ```
