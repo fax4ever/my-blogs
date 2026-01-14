@@ -348,7 +348,26 @@ env:
   {{- end }}
 ```
 
+### Llama Stack client tracing configuration
 
+According to our research, in at least Llama Stack 0.2.x and 0.3.x, the span context is not automatically propagated from the Llama Stack server to the MCP servers. 
+Therefore, we needed to manually inject the parent tracing context in the HTTP headers when making requests to MCP servers.
+
+*Adapted from `agent-service/src/agent_service/langgraph/responses_agent.py`:*
+
+```
+from opentelemetry.propagate import inject
+
+# Prepare headers for MCP server request
+tool_headers = {}
+
+# Inject current tracing context into headers
+# This will add traceparent and tracestate headers
+inject(tool_headers)
+logger.debug(
+    f"Injected tracing headers for MCP server {server_name}: {list(tool_headers.keys())}"
+)
+```
 
 ## Collect the tracing with an all-in-one Jaeger server
 
