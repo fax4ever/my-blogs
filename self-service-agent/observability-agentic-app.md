@@ -5,7 +5,7 @@ You have some errors, warnings, or alerts. If you are using reckless mode, turn 
 * WARNINGs: 0
 * ALERTS: 5
 
-Conversion time: 2.408 seconds.
+Conversion time: 2.767 seconds.
 
 
 Using this Markdown file:
@@ -18,7 +18,7 @@ Using this Markdown file:
 Conversion notes:
 
 * Docs™ to Markdown version 2.0β1
-* Wed Jan 14 2026 03:07:51 GMT-0800 (PST)
+* Wed Jan 14 2026 05:57:16 GMT-0800 (PST)
 * Source doc: Debugging Autonomy: Advanced Observability for a Self-Service IT Agent
 * Tables are currently converted to HTML tables.
 * This document has images: check for >>>>>  gd2md-html alert:  inline image link in generated source and store images to your server. NOTE: Images in exported zip file from Google Docs may not appear in  the same order as they do in your doc. Please check the images!
@@ -43,7 +43,7 @@ Conversion notes:
 
 Agentic applications typically involve complex interactions between multiple components—routing agents, specialist agents, knowledge bases, MCP servers, and external systems—making production debugging challenging without proper visibility.
 
-In this blog post, we will describe in detail a practical approach to setting up distributed tracing for an agentic workflow, based on lessons learned while developing the [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent) quickstart
+In this blog post, we will describe in detail a practical approach to setting up distributed tracing for an agentic workflow, based on lessons learned while developing the [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent) quickstart.
 
 By the end of this journey, you will have configured OpenTelemetry support for distributed tracing across all typical agentic application components, enabling you to track requests end-to-end through application workloads, MCP Servers, and Llama Stack. By integrating with OpenShift's observability stack, you'll gain unified monitoring across all platform components alongside your existing infrastructure metrics.
 
@@ -259,16 +259,56 @@ For instance, if the HELM value `otelExporter` is set, all workloads will set th
 
 For some libraries such as FastMCP, we didn't find any viable auto-instrumentation solution at the time of development. Therefore, we opted for manual instrumentation to trace MCP server calls.
 
-Manual instrumentation should remain consistent with automatic instrumentation. We want causally related spans to be correlated, even when some are produced manually and others automatically. To achieve this, the manual instrumentation must correctly extract the parent context (if present) from the MCP request and use it as the parent span context when creating the child span.
+Manual instrumentation requires careful attention to detail to ensure that manually created spans integrate seamlessly with automatically instrumented spans. The key challenge is maintaining proper trace context propagation—ensuring that manually created spans correctly identify their parent spans and that child operations (including automatically instrumented HTTP calls) continue the trace correctly.
+
+
+### Setting Up Manual Instrumentation
+
+Before creating spans manually, you need to initialize the OpenTelemetry tracer. This setup is typically done once at module initialization:
+
+*Adapted from `mcp-servers/snow/src/snow/tracing.py`:*
+
+
+```
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+import os
+
+# Initialize tracer provider if not already initialized
+if not trace.get_tracer_provider():
+    provider = TracerProvider()
+    trace.set_tracer_provider(provider)
+
+# Configure OTLP exporter if endpoint is provided
+otel_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+if otel_endpoint:
+    otlp_exporter = OTLPSpanExporter(endpoint=otel_endpoint)
+    span_processor = BatchSpanProcessor(otlp_exporter)
+    trace.get_tracer_provider().add_span_processor(span_processor)
+
+# Get tracer for this service
+tracer = trace.get_tracer(__name__, "1.0.0")
+```
+
+
+
+### Context Extraction and Span Creation
+
+The most critical aspect of manual instrumentation is correctly extracting the parent trace context from incoming requests. This ensures that your manually created spans appear as children of the appropriate parent span in the trace, maintaining the causal relationship between operations.
+
+When an MCP server receives a tool invocation request, the trace context (if present) is transmitted in HTTP headers. The W3C Trace Context standard specifies that trace context is carried in the `traceparent` header. We extract this context and use it as the parent when creating our span:
 
 Here is a code example inspired by the solution we implemented in the [It-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent):
 
-*Adapted from `mcp-servers/snow/src/snow/[tracing.py](tracing.py)`:*
+*Adapted from `mcp-servers/snow/src/snow/tracing.py`:*
 
 
 ```
 from opentelemetry.propagate import extract
-                
+from opentelemetry.trace import Status, StatusCode
+
 headers = ctx.request_context.headers
 # Convert headers to dict-like format expected by propagator
 # Normalize header keys to lowercase as traceparent is case-insensitive
@@ -277,29 +317,107 @@ carrier = {k.lower(): v for k, v in dict(headers).items()}
 # Extract context from headers using the global propagator
 parent_context = extract(carrier)
 
+# Create span with parent context
+span_name = f"mcp.tool.{func.__name__}"
 with tracer.start_as_current_span(span_name, context=parent_context) as span:
-  span.set_attribute("mcp.tool.name", func.__name__)
-  
-  for i, arg in enumerate(args):
-    span.set_attribute(f"mcp.tool.arg.{i}", str(arg))  
+    # Set semantic attributes following OpenTelemetry conventions
+    span.set_attribute("mcp.tool.name", func.__name__)
+    span.set_attribute("mcp.server.name", server_name)
+    
+    # Record function arguments as attributes for debugging
+    for i, arg in enumerate(args):
+        span.set_attribute(f"mcp.tool.arg.{i}", str(arg))  
 
-  for key, value in kwargs.items():
-    span.set_attribute(f"mcp.tool.param.{key}", str(value))
-  
-  try:
-    # Execute the tool function
-    # The span context will automatically propagate to any
-    # instrumented HTTP calls made within this function
-    result = func(*args, **kwargs) 
-    span.set_status(Status(StatusCode.OK))
+    for key, value in kwargs.items():
+        span.set_attribute(f"mcp.tool.param.{key}", str(value))
+    
+    try:
+        # Execute the tool function
+        # The span context will automatically propagate to any
+        # instrumented HTTP calls made within this function
+        result = func(*args, **kwargs) 
+        span.set_status(Status(StatusCode.OK))
+        return result
 
-  except Exception as e:
-    # Record the exception and set error status
-    span.record_exception(e)
-    span.set_status(Status(StatusCode.ERROR, str(e)))
-    raise
+    except Exception as e:
+        # Record the exception and set error status
+        span.record_exception(e)
+        span.set_status(Status(StatusCode.ERROR, str(e)))
+        raise
 ```
 
+
+
+### Key Considerations for Manual Instrumentation
+
+**Span Naming Conventions**: Use consistent, hierarchical naming that reflects the operation being traced. For MCP tools, we use the pattern `mcp.tool.{tool_name}` which makes it easy to filter and group related spans in the tracing UI.
+
+**Attribute Best Practices**: 
+
+
+
+* Use semantic attribute names following [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/) where applicable
+* For custom attributes, use a consistent prefix (e.g., `mcp.`) to avoid conflicts
+* Be mindful of attribute value size, very large values can impact trace storage and query performance
+* Include enough context to debug issues but avoid sensitive data (passwords, tokens, etc.)
+
+**Error Handling**: Always set span status appropriately:
+
+
+
+* `StatusCode.OK` for successful operations
+* `StatusCode.ERROR` for failures, with an optional descriptive message
+* Use `span.record_exception()` to capture exception details, which automatically adds stack traces and exception metadata to the span
+
+**Context Propagation**: When you create a span with `start_as_current_span()`, it becomes the active span in the current context. This means any automatically instrumented operations (like HTTP calls) that occur within that span's context will automatically become child spans. This seamless integration between manual and automatic instrumentation is one of OpenTelemetry's key strengths.
+
+**Performance Impact**: Manual instrumentation adds minimal overhead, typically microseconds per span. However, be cautious about:
+
+
+
+* Creating too many fine-grained spans for trivial operations
+* Setting attributes with expensive computations (evaluate lazily if needed)
+* Including large data structures as attribute values
+
+
+### Decorator Pattern for Clean Integration
+
+To make manual instrumentation less intrusive, we wrap MCP tool functions with a decorator that handles all the tracing logic:
+
+*Adapted from `mcp-servers/snow/src/snow/[tracing.py](tracing.py)`:*
+
+
+```
+from functools import wraps
+
+def trace_mcp_tool(server_name: str):
+    """Decorator to automatically trace MCP tool invocations."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Extract context from request (implementation depends on framework)
+            headers = get_request_headers()  # Framework-specific
+            carrier = {k.lower(): v for k, v in dict(headers).items()}
+            parent_context = extract(carrier)
+            
+            span_name = f"mcp.tool.{func.__name__}"
+            with tracer.start_as_current_span(span_name, context=parent_context) as span:
+                span.set_attribute("mcp.tool.name", func.__name__)
+                span.set_attribute("mcp.server.name", server_name)
+                # ... rest of instrumentation ...
+                return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+# Usage:
+@trace_mcp_tool(server_name="snow")
+def get_employee_laptop_info(employee_id: str):
+    # Tool implementation
+    pass
+```
+
+
+This pattern keeps the tracing logic separate from business logic, making the codebase easier to maintain and ensuring consistent instrumentation across all MCP tools.
 
 
 ## Llama Stack tracing configuration
@@ -348,12 +466,16 @@ env:
   {{- end }}
 ```
 
+
+
 ### Llama Stack client tracing configuration
 
 According to our research, in at least Llama Stack 0.2.x and 0.3.x, the span context is not automatically propagated from the Llama Stack server to the MCP servers. 
+
 Therefore, we needed to manually inject the parent tracing context in the HTTP headers when making requests to MCP servers.
 
 *Adapted from `agent-service/src/agent_service/langgraph/responses_agent.py`:*
+
 
 ```
 from opentelemetry.propagate import inject
@@ -368,6 +490,8 @@ logger.debug(
     f"Injected tracing headers for MCP server {server_name}: {list(tool_headers.keys())}"
 )
 ```
+
+
 
 ## Collect the tracing with an all-in-one Jaeger server
 
