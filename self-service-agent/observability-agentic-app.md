@@ -5,7 +5,7 @@ You have some errors, warnings, or alerts. If you are using reckless mode, turn 
 * WARNINGs: 0
 * ALERTS: 5
 
-Conversion time: 2.2 seconds.
+Conversion time: 1.874 seconds.
 
 
 Using this Markdown file:
@@ -18,7 +18,7 @@ Using this Markdown file:
 Conversion notes:
 
 * Docs™ to Markdown version 2.0β1
-* Wed Jan 14 2026 08:27:04 GMT-0800 (PST)
+* Wed Jan 14 2026 09:15:44 GMT-0800 (PST)
 * Source doc: Debugging Autonomy: Advanced Observability for a Self-Service IT Agent
 * Tables are currently converted to HTML tables.
 * This document has images: check for >>>>>  gd2md-html alert:  inline image link in generated source and store images to your server. NOTE: Images in exported zip file from Google Docs may not appear in  the same order as they do in your doc. Please check the images!
@@ -163,22 +163,63 @@ As we'll see in the examples later in this post, a typical trace shows all compo
 
 ## Instrumenting Llama Stack
 
-One of the significant advantages of OpenTelemetry's widespread adoption is that many modern frameworks, libraries, and platforms now include built-in observability support. Rather than requiring manual instrumentation of every operation, these systems provide native OpenTelemetry integration that can be enabled through simple configuration.
+Llama Stack includes native OpenTelemetry support, so enabling tracing requires only configuration—no custom instrumentation code. Once enabled, Llama Stack automatically produces spans for LLM inference requests, tool invocations, and vector database operations, all with relevant attributes like model name, token counts, and tool parameters.
 
-Llama Stack is an excellent example of this approach. As a critical component in our agentic architecture, responsible for LLM inference, tool calling, and knowledge base operations, proper tracing of Llama Stack interactions is essential for understanding agent behavior and performance. Fortunately, Llama Stack includes native OpenTelemetry telemetry support that integrates seamlessly with the broader tracing infrastructure.
-
-When a framework provides native OpenTelemetry support, several advantages emerge. Instead of manually creating spans for each operation, configuring attributes, and managing context propagation, you simply enable tracing through configuration settings while the framework handles all instrumentation details internally. Framework maintainers understand their system's internals and can instrument at the appropriate granularity, capturing relevant operations with meaningful attributes and maintaining consistent naming conventions across releases. Native support also ensures that trace context flows correctly through the framework's internal operations—when Llama Stack makes inference calls or executes tool invocations, the trace context automatically propagates to child operations without requiring application-level intervention. Perhaps most importantly, as the framework evolves, its instrumentation evolves with it, ensuring that new features automatically include appropriate tracing without requiring updates to your instrumentation code.
-
-In the it-self-service-agent quickstart, enabling Llama Stack tracing requires minimal configuration. The framework supports multiple telemetry sinks where trace data can be exported, including console logging, SQLite storage for local inspection, and OpenTelemetry trace export for integration with distributed tracing backends. For our purposes, we configure Llama Stack to export traces to our OpenTelemetry collector using the *otel_trace* sink.
-
-Once configured, Llama Stack automatically produces spans for all its major operations. Each LLM chat completion or generation request creates a span with relevant attributes like model name, token counts, and sampling parameters. When the LLM invokes tools through Llama Stack, each tool call is traced as a child span including the tool name and parameters. Vector database operations for RAG (Retrieval Augmented Generation) are captured with query details and retrieval results, providing visibility into the knowledge retrieval process that augments the LLM's responses.
-
-These spans integrate seamlessly with the spans we create in our application services, appearing as child spans under the agent service operations that invoke Llama Stack. When viewing a complete trace, you can see exactly how much time was spent in LLM inference versus tool execution versus knowledge retrieval—critical insights for optimizing agent performance. The specific configuration details for Llama Stack vary slightly between the 0.2.x and 0.3.x release series, which we'll cover in detail in the "Llama Stack tracing configuration" section later in this post.
+For instance default v. 0.2 Llama Stack configuration has a telemetry component defined like:
 
 
-## Autoinstrumentation: HTTP Clients and FastAPI
+```
+telemetry:
+  - provider_id: meta-reference
+    provider_type: inline::meta-reference
+    config:
+      sinks: ${env.TELEMETRY_SINKS:=console,sqlite,otel_trace}
+      service_name: {{ include "llama-stack.fullname" . }}
+      otel_exporter_otlp_endpoint: ${env.OTEL_EXPORTER_OTLP_ENDPOINT:=}
+```
 
-The [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent) quickstart consists of a number of different components. For [Llama stack ](https://github.com/llamastack/llama-stack)support for OpenTelemetry was built in and we only had to enable it. For the components we built ourselves we needed to figure out how to add support for OpenTelemetry.
+
+For Llama Stack 0.3.x, configuration is simpler—just set environment variables:
+
+
+```
+env:
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: {{ .Values.otelExporter }}
+  - name: TELEMETRY_SINKS
+    value: console,sqlite,otel_trace
+```
+
+
+
+### Llama Stack client tracing configuration
+
+According to our research, in at least Llama Stack 0.2.x and 0.3.x, the span context is not automatically propagated from the Llama Stack server to the MCP servers. 
+
+Therefore, we needed to manually inject the parent tracing context in the HTTP headers when making requests to MCP servers.
+
+*Adapted from [agent-service/src/agent_service/langgraph/responses_agent.py](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/agent-service/src/agent_service/langgraph/responses_agent.py):*
+
+
+```
+from opentelemetry.propagate import inject
+
+# Prepare headers for MCP server request
+tool_headers = {}
+
+# Inject current tracing context into headers
+# This will add traceparent and tracestate headers
+inject(tool_headers)
+logger.debug(
+    f"Injected tracing headers for MCP server {server_name}: {list(tool_headers.keys())}"
+)
+```
+
+
+
+## Auto-instrumentation: HTTP Clients and FastAPI
+
+The [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent) quickstart consists of a number of different components. For the components we built ourselves we needed to figure out how to add support for OpenTelemetry.
 
 The OpenTelemetry spans we want to capture typically depend on the frameworks used in the components. For instance, in the [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent) application, much of the communication between workloads is implemented as REST API calls. We want to capture these calls in our tracing, producing a span for each invocation while maintaining the causal relationships between them.
 
@@ -200,7 +241,7 @@ In the quickstart components we imported the following dependencies:
 ```
 
 
-When using autoinstrumentation, we typically define environment variables that may or may not be used by the instrumentation framework (depending on the implementation).
+When using auto-instrumentation, we typically define environment variables that may or may not be used by the instrumentation framework (depending on the implementation).
 
 For instance, in our project's autoinstrumented components, we set the following variables:
 
@@ -230,7 +271,7 @@ set_global_textmap(TraceContextTextMapPropagator())
 ```
 
 
-To enable the HTTPX client autoinstrumentation:
+To enable the HTTPX client auto-instrumentation:
 
 *Adapted from [request-manager/src/request_manager/main.py](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/request-manager/src/request_manager/main.py) and similar service main files:*
 
@@ -462,31 +503,6 @@ env:
   - name: TELEMETRY_SINKS
     value: {{ .Values.telemetrySinks }}
   {{- end }}
-```
-
-
-
-### Llama Stack client tracing configuration
-
-According to our research, in at least Llama Stack 0.2.x and 0.3.x, the span context is not automatically propagated from the Llama Stack server to the MCP servers. 
-
-Therefore, we needed to manually inject the parent tracing context in the HTTP headers when making requests to MCP servers.
-
-*Adapted from [agent-service/src/agent_service/langgraph/responses_agent.py](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/agent-service/src/agent_service/langgraph/responses_agent.py):*
-
-
-```
-from opentelemetry.propagate import inject
-
-# Prepare headers for MCP server request
-tool_headers = {}
-
-# Inject current tracing context into headers
-# This will add traceparent and tracestate headers
-inject(tool_headers)
-logger.debug(
-    f"Injected tracing headers for MCP server {server_name}: {list(tool_headers.keys())}"
-)
 ```
 
 
