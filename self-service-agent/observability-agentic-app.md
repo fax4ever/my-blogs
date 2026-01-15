@@ -5,7 +5,7 @@ You have some errors, warnings, or alerts. If you are using reckless mode, turn 
 * WARNINGs: 0
 * ALERTS: 5
 
-Conversion time: 1.874 seconds.
+Conversion time: 2.284 seconds.
 
 
 Using this Markdown file:
@@ -18,7 +18,7 @@ Using this Markdown file:
 Conversion notes:
 
 * Docs™ to Markdown version 2.0β1
-* Wed Jan 14 2026 09:15:44 GMT-0800 (PST)
+* Thu Jan 15 2026 00:25:47 GMT-0800 (PST)
 * Source doc: Debugging Autonomy: Advanced Observability for a Self-Service IT Agent
 * Tables are currently converted to HTML tables.
 * This document has images: check for >>>>>  gd2md-html alert:  inline image link in generated source and store images to your server. NOTE: Images in exported zip file from Google Docs may not appear in  the same order as they do in your doc. Please check the images!
@@ -76,7 +76,7 @@ If you are interested in a bit more detail on the business benefits of using age
 
 In the first part of this article, we will explain how to produce tracing spans from application workloads, assuming an OpenTelemetry collector is available at a given remote address. In the second part, we will explore ways to configure the tracing infrastructure backing the collector, particularly using [OpenShift Container Platform](https://www.redhat.com/en/technologies/cloud-computing/openshift/container-platform).
 
-In this post  tracing is configured following the OpenTelemetry version 1.37.0, but of course different versions may be used. For more information on the standard, see the [OpenTelemetry page.](https://opentelemetry.io/) In this post examples are in Python,   however OpenTelemetry libraries are available for most any popular programming languages.
+In this post  tracing is configured following the OpenTelemetry version 1.37.0, but of course different versions may be used. For more information on the standard, see the [OpenTelemetry page.](https://opentelemetry.io/) In this post examples are in Python, however OpenTelemetry libraries are available for most any popular programming languages.
 
 
 ## OpenTelemetry
@@ -110,8 +110,8 @@ The quickstart deploys the following main components:
 
 
 * **Request Manager**: The central entry point that normalizes incoming requests from multiple channels (Slack, email, CLI, webhooks, web UI) into a standardized format.
-* **Agent Service**: The AI orchestration engine that routes requests between a routing agent and specialist agents (laptop refresh, privacy impact assessment, RFP generation, etc.).
-* **Integration Dispatcher**: Handles bidirectional communication with external channels, routing agent responses back to users via their original communication channel with appropriate formatting.
+* **Agent Service**: The AI orchestration engine that routes requests between a routing agent and specialist agents.
+* **Integration Dispatcher**: Handles bidirectional communication with external channels, routing agent responses back to users via their original communication channel.
 * **Llama Stack**: Provides LLM inference endpoints for agent reasoning, manages tool calling and function execution, and supports vector database operations for knowledge base retrieval.
 * **MCP Servers**: Model Context Protocol servers that provide tools for integrating with external systems.
 * **Eventing Layer**: Routes CloudEvents between services. 
@@ -192,11 +192,9 @@ env:
 
 
 
-### Llama Stack client tracing configuration
+### A wrinkle with MCP servers
 
-According to our research, in at least Llama Stack 0.2.x and 0.3.x, the span context is not automatically propagated from the Llama Stack server to the MCP servers. 
-
-Therefore, we needed to manually inject the parent tracing context in the HTTP headers when making requests to MCP servers.
+According to our research, in at least Llama Stack 0.2.x and 0.3.x, the span context is not automatically propagated from the Llama Stack server to the MCP servers when a call is made through the Responses API.  We, therefore, we needed to manually inject the parent tracing context so they appear in the HTTP headers when Llama Stack make a call to an MCP Server. We do this as follows:
 
 *Adapted from [agent-service/src/agent_service/langgraph/responses_agent.py](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/agent-service/src/agent_service/langgraph/responses_agent.py):*
 
@@ -207,23 +205,45 @@ from opentelemetry.propagate import inject
 # Prepare headers for MCP server request
 tool_headers = {}
 
-# Inject current tracing context into headers
-# This will add traceparent and tracestate headers
 inject(tool_headers)
 logger.debug(
     f"Injected tracing headers for MCP server {server_name}: {list(tool_headers.keys())}"
 )
+
 ```
 
+
+Which results in an additional transparent header in what we pass to the Responses API as the MCP server config as follows:
+
+```python
+
+
+```
+ [
+      {
+          "type": "mcp",
+          "server_label": "snow",
+          "server_url": "http://mcp-self-service-agent-snow:8000/mcp",
+          "require_approval": "never",
+          "headers": {
+              "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+              "tracestate": "",
+          }
+      }
+  ]
+```
+
+
+```
 
 
 ## Auto-instrumentation: HTTP Clients and FastAPI
 
 The [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent) quickstart consists of a number of different components. For the components we built ourselves we needed to figure out how to add support for OpenTelemetry.
 
-The OpenTelemetry spans we want to capture typically depend on the frameworks used in the components. For instance, in the [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent) application, much of the communication between workloads is implemented as REST API calls. We want to capture these calls in our tracing, producing a span for each invocation while maintaining the causal relationships between them.
+The OpenTelemetry spans we want to capture typically depend on the frameworks used in the components. For instance, in the [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent) quickstart, much of the communication between workloads is implemented as REST API calls. We want to capture these calls in our tracing, producing a span for each invocation while maintaining the causal relationships between them.
 
-Whenever a library supports auto-instrumentation, we should take advantage of it. For example, we used the [OpenTelemetry instrumentation HTTPx](https://pypi.org/project/opentelemetry-instrumentation-httpx/) and [OpenTelemetry FastAPI Instrumentation](https://opentelemetry-python-contrib.readthedocs.io/en/latest/instrumentation/fastapi/fastapi.html) libraries to instrument all REST server and client requests and responses within the quickstart. This approach produces spans for all calls without requiring potentially error-prone custom code. In addition,  context propagation is handled by these libraries, eliminating the need to manually pass context from parent calls to child calls.
+Whenever a library supports auto-instrumentation, we should take advantage of it. For example, we used the [OpenTelemetry instrumentation HTTPx](https://pypi.org/project/opentelemetry-instrumentation-httpx/) and [OpenTelemetry FastAPI Instrumentation](https://opentelemetry-python-contrib.readthedocs.io/en/latest/instrumentation/fastapi/fastapi.html) libraries to instrument all REST server and client requests and responses within the quickstart. This approach produces spans for all calls without requiring potentially error-prone custom code. In addition, context propagation is handled by these libraries, eliminating the need to manually pass context from parent calls to child calls.
 
 In our project, we added these instrumentation libraries to all modules that use the frameworks, along with the base libraries for the OpenTelemetry APIs, SDK, and exporter.
 
@@ -282,7 +302,7 @@ HTTPXClientInstrumentor().instrument()
 ```
 
 
-To enable the FastAPI instrumentation:
+and finally to enable the FastAPI instrumentation:
 
 *Adapted from [request-manager/src/request_manager/main.py](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/request-manager/src/request_manager/main.py) and similar service main files:*
 
@@ -298,7 +318,7 @@ FastAPIInstrumentor.instrument_app(app)
 
 ## Manual Instrumentation: MCP Servers
 
-For some libraries such as FastMCP, we didn't find any viable auto-instrumentation solution at the time of development. Therefore, we opted for manual instrumentation to trace MCP server calls.
+At the time of development, for FastMCP, we could not find  an auto-instrumentation library which produced the results we were looking for. Therefore, we opted for manual instrumentation to trace MCP server calls.
 
 Manual instrumentation requires that we ensure that manually created spans integrate with automatically instrumented spans. The key challenge is maintaining proper trace context propagation—ensuring that manually created spans correctly identify their parent spans and that child operations (including automatically instrumented HTTP calls) continue the trace correctly.
 
@@ -337,7 +357,7 @@ tracer = trace.get_tracer(__name__, "1.0.0")
 
 ### Context Extraction and Span Creation
 
-One of the key aspects of manual instrumentation is correctly extracting the parent trace context from incoming requests. This ensures that your manually created spans appear as children of the appropriate parent span in the trace, maintaining the causal relationship between operations.
+Next we need to ensure that the parent trace context is extracted from incoming requests. This ensures that your manually created spans appear as children of the appropriate parent span in the trace, maintaining the causal relationship between operations.
 
 When an MCP server receives a tool invocation request, the trace context (if present) is transmitted in HTTP headers. As covered earlier, the W3C Trace Context standard specifies that trace context is carried in the `traceparent` header. We extract this from the context and use it as the parent when creating our span:
 
@@ -387,7 +407,7 @@ with tracer.start_as_current_span(span_name, context=parent_context) as span:
 
 
 
-### Key Considerations for Manual Instrumentation
+### Additional Considerations for Manual Instrumentation
 
 **Span Naming Conventions**: Use consistent, hierarchical naming that reflects the operation being traced. For MCP tools, we use the pattern `mcp.tool.{tool_name}` which makes it easy to filter and group related spans in the tracing UI.
 
@@ -421,7 +441,7 @@ with tracer.start_as_current_span(span_name, context=parent_context) as span:
 
 ### Decorator Pattern for Clean Integration
 
-To make manual instrumentation less intrusive, we wrap MCP tool functions with a decorator that handles all the tracing logic:
+To make manual instrumentation less intrusive in the quickstart, we wrap MCP tool functions with a decorator that handles all the tracing logic:
 
 *Adapted from [mcp-servers/snow/src/snow/tracing.py](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/mcp-servers/snow/src/snow/tracing.py):*
 
@@ -511,7 +531,7 @@ env:
 
 One way to visualize the spans we've produced in the previous sections is to deploy an all-in-one Jaeger server instance you can do with through podman with something like:
 
-In the  [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent) we have also included a make target called jaeger-deploy that can be used to deploy an instance of Jaeger in the same namespace as the quickstart. For more details on a simple Jaeger deployment please refer to the [Jaeger Getting Started guide](https://www.jaegertracing.io/docs/2.14/getting-started/).
+In the [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent) we have also included a make target called [jaeger-deploy](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/d7d1f35f94030514ddc08906c03cdecffe2deeea/Makefile#L1398) that can be used to deploy an instance of Jaeger in the same namespace as the quickstart. For more details on a simple Jaeger deployment please refer to the [Jaeger Getting Started guide](https://www.jaegertracing.io/docs/2.14/getting-started/).
 
 Below are some example traces produced by the [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent).
 
@@ -593,6 +613,11 @@ This view provides:
 The custom resource type `opentelemetry.io/v1beta1.OpenTelemetryCollector` is managed by the **Red Hat build of OpenTelemetry Operator**. This operator is available through OpenShift's Operator Lifecycle Manager (OLM) and can be installed from the `redhat-operators` catalog. The operator handles the deployment, configuration, and lifecycle management of OpenTelemetry Collector instances based on the `OpenTelemetryCollector` custom resource definitions.
 
 The  [lls-observability quickstart](https://github.com/rh-ai-quickstart/lls-observability/blob/main/helm/02-observability/otel-collector/otel-collector.yaml), provides the full details on how to deploy the OpenShift Distributed Tracing Platform.
+
+
+## Wrapping Up
+
+In this post we’ve taken you through instrumenting a Llama Stack based agentic system with Open Telemetry and shared some of what we learned as we developed the  [it-self-service-agent](https://github.com/rh-ai-quickstart/it-self-service-agent) quickstart. We hope you are now interested to learn more about the overall implementation.
 
 
 ## Next steps
