@@ -5,7 +5,7 @@ You have some errors, warnings, or alerts. If you are using reckless mode, turn 
 * WARNINGs: 0
 * ALERTS: 5
 
-Conversion time: 2.284 seconds.
+Conversion time: 2.81 seconds.
 
 
 Using this Markdown file:
@@ -18,7 +18,7 @@ Using this Markdown file:
 Conversion notes:
 
 * Docs™ to Markdown version 2.0β1
-* Thu Jan 15 2026 00:25:47 GMT-0800 (PST)
+* Thu Jan 15 2026 02:10:35 GMT-0800 (PST)
 * Source doc: Debugging Autonomy: Advanced Observability for a Self-Service IT Agent
 * Tables are currently converted to HTML tables.
 * This document has images: check for >>>>>  gd2md-html alert:  inline image link in generated source and store images to your server. NOTE: Images in exported zip file from Google Docs may not appear in  the same order as they do in your doc. Please check the images!
@@ -194,7 +194,7 @@ env:
 
 ### A wrinkle with MCP servers
 
-According to our research, in at least Llama Stack 0.2.x and 0.3.x, the span context is not automatically propagated from the Llama Stack server to the MCP servers when a call is made through the Responses API.  We, therefore, we needed to manually inject the parent tracing context so they appear in the HTTP headers when Llama Stack make a call to an MCP Server. We do this as follows:
+According to our research, in at least Llama Stack 0.2.x and 0.3.x, the span context is not automatically propagated from the Llama Stack server to the MCP servers when a call is made through the Responses API. We therefore needed to manually inject the parent tracing context so they appear in the HTTP headers when Llama Stack makes a call to an MCP Server. We do this as follows:
 
 *Adapted from [agent-service/src/agent_service/langgraph/responses_agent.py](https://github.com/rh-ai-quickstart/it-self-service-agent/blob/main/agent-service/src/agent_service/langgraph/responses_agent.py):*
 
@@ -557,16 +557,22 @@ As you can see, the trace structure can be quite complex. A typical request incl
 
 
 ```
-http.request POST /api/v1/requests (request-manager)          [120ms]
-  └─ publish_event agent.request (request-manager)            [10ms]
-      └─ http.request POST /agent/chat (agent-service)        [95ms]
-          ├─ knowledge_base_query laptop-refresh-policy       [15ms]
-          ├─ http.request POST /inference/chat (llamastack)   [65ms]
-          │   └─ mcp.tool.get_employee_laptop_info            [8ms]
-          │       └─ http.request GET servicenow.com/api      [6ms]
-          └─ http.request POST /inference/chat (llamastack)   [12ms]
-              └─ mcp.tool.open_laptop_refresh_ticket          [8ms]
-                  └─ http.request POST servicenow.com/api     [6ms]
+request-manager: POST /api/v1/requests/generic 				[3.75s]
+  └─ mock-eventing-service: POST 						[3.66s]
+      └─ agent-service: POST /api/v1/events/cloudevents			[3.64s]
+           ├─ mock-eventing-service: POST /{namespace}/{broker_name}	[1.03ms]
+           │   └─ integration-dispatcher: POST /notifications		[1ms]
+           ├─ agent-service: GET							[3.68ms]
+           │   └─ llamastack: /v1/models					[8.21ms]
+           ├─ agent-service: GET							[2.53ms]
+           │   └─ llamastack: /v1/openai/v1/vector_stores			[9.43ms]
+           ├─ agent-service: POST						[3.55s]
+           ├─ llamastack: /v1/openai/v1/responses				[3.54s]
+           │   ├─ llamastack: InferenceRouter.openai_chat_completion	[88.26ms]
+           │   ├─ llamastack: InferenceRouter.stream_tokens_openai_chat	[1.88s]
+           │   ├─ llamastack: InferenceRouter.openai_chat_completion	[90.65ms]
+           │   └─ llamastack: InferenceRouter.stream_tokens_openai_chat 	[1.39s]
+           └─ snow-mcp-server: mcp.tool.open_laptop_refresh_ticket		[11.93ms]
 ```
 
 
