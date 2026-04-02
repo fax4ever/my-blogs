@@ -291,6 +291,12 @@ While the IT self-service agent quickstart uses the OpenAI-compatible API expose
 `}`  
 ```` ``` ````
 
+## RAG and Knowledge Base Integration
+
+The IT self-service agent integrates a RAG-based knowledge base, exposed as an MCP server, which allows the Laptop Refresh Agent to query policy documents — for example, to determine laptop refresh eligibility rules. This grounds the agent's decisions in up-to-date enterprise knowledge rather than relying solely on what was encoded in the model at training time.
+
+The Ambient Patient blueprint does not include a RAG component. The Medication Lookup agent queries a [FHIR](https://hl7.org/fhir/) server directly for patient-specific data and uses [Tavily](https://tavily.com/) for general medication information searches, but there is no mechanism for grounding responses in a curated internal knowledge base.
+
 ## Models Comparison
 
 |  | Ambient patient blueprint | IT self-service agent  |
@@ -301,18 +307,60 @@ While the IT self-service agent quickstart uses the OpenAI-compatible API expose
 | EMBEDDING MODELS (110M-400M Parameters) | \- | all-MiniLM-L6-v2 |
 | EVALUATION MODELS | \- | Llama 4 scout 16B w4a16 |
 
+## Safety & Guardrails
+
+Both applications treat guardrails as optional components that can be enabled or disabled via configuration, rather than hard-wiring them into the agents.
+
+The Ambient Patient blueprint integrates [NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails), configured through YAML-based Colang flows. This allows fine-grained customisation of which topics the model may and may not discuss, as well as response shaping. Safety is enforced by the NemoGuard-8B Content Safety and Topic Control models.
+
+The IT self-service agent takes a different approach, combining [PromptGuard](https://www.llama.com/docs/model-cards-and-prompt-formats/prompt-guard) for prompt injection detection with [Llama Guard 3](https://www.llama.com/docs/model-cards-and-prompt-formats/llama-guard-3) for content safety. While less customisable in terms of topic control, this approach is more focused on preventing adversarial inputs from reaching the model.
+
+The key philosophical difference is that NVIDIA focuses on *what the model is allowed to say*, while Red Hat focuses on *preventing malicious inputs from reaching the model in the first place*.
+
+|  | Ambient patient blueprint | IT self-service agent |
+| :---- | :---- | :---- |
+| GUARDRAILS FRAMEWORK | NeMo Guardrails 0.17.0 | PromptGuard \+ Llama Guard 3 |
+| CONTENT SAFETY MODEL (8B) | NemoGuard-8B Content Safety | Llama Guard 3 |
+| TOPIC CONTROL | NemoGuard-8B Topic Control | \- |
+| PROMPT INJECTION PROTECTION | \- | PromptGuard |
+| CONFIGURATION | YAML-based Colang flows | Service-based integration |
+| DEPLOYMENT | Optional, configurable via env var | Optional service (disabled by default) |
+
 # Other Aspects
 
 ## Deployment Environment
 
 The Ambient Patient blueprint is designed to be deployed using Docker Compose, which is primarily designed for managing multi-container applications on a single host.  
 It is also quite difficult to configure for end-to-end operation when deployed on a Kubernetes cluster. For instance, [WebRTC](https://webrtc.org/) communication between the browser and the Kubernetes cluster requires a TURN server to support NAT traversal and relay. This approach was adopted, for instance, in [our fork of the Ambient Patient blueprint](https://github.com/RHEcosystemAppEng/ambient-patient), in which we extended support for deployment on an [OpenShift](https://www.redhat.com/en/technologies/cloud-computing/openshift) cluster.  
-On the other hand, the IT self-service agent was designed as a Kubernetes/OpenShift-native application. Everything is designed to be straightforward to deploy on container platforms.  
+On the other hand, the IT self-service agent was designed as a Kubernetes/OpenShift-native application. Everything is designed to be straightforward to deploy on container platforms.
+
+The two applications also follow different scalability models. The Ambient Patient blueprint scales *vertically* — more GPUs are added to host larger or additional NIM inference endpoints. The IT self-service agent scales *horizontally* — its services are stateless pods that can be replicated freely, with state externalised to PostgreSQL and message routing decoupled via Kafka and Knative, so any pod can handle any request at any time.
+
+## Event-driven Architecture
+
+The IT self-service agent is built on an event-driven architecture using [Apache Kafka](https://kafka.apache.org) and [Knative Eventing](https://knative.dev/docs/eventing/) (CloudEvents). When a user sends a message via Slack or email, the Integration Dispatcher publishes it as a Kafka event on a request topic. The Request Manager consumes the event asynchronously, invokes the LangGraph agent, and publishes the response back to a response topic. The Integration Dispatcher then delivers it to the appropriate channel.
+
+This design decouples front-end channels from agent processing, enabling the system to absorb high message volumes without blocking, survive transient failures, and scale individual components independently.
+
+The Ambient Patient blueprint is fully synchronous by contrast: a user message is handled in a single request-response cycle with token streaming. This is well suited for real-time voice interaction but limits the system's ability to scale under concurrent load or to recover gracefully from service interruptions.  
 
 ## UI Channels and User Experience
 
 The Ambient Patient blueprint delivers a rich and immersive user experience, making extensive use of full-duplex protocols — WebSockets for text and WebRTC for audio. It provides two interfaces: a text-based one and a voice-based one that also plays responses as audio. The overall user experience is excellent.  
 The IT self-service agent does not expose a web interface, but it allows users to interact through different channels: Slack and email. This makes the application better suited for production environments, though potentially less suitable as a demo, since configuring an SMTP/IMAP email server or a Slack workspace takes some time.
+
+## Real-time Audio Pipeline
+
+The voice interface of the Ambient Patient blueprint is backed by a multi-layer real-time audio pipeline, which has no equivalent in the IT self-service agent:
+
+1\. The browser captures microphone audio and establishes a [WebRTC](https://webrtc.org/) connection (Opus codec, 48kHz) to a [Pipecat](https://www.pipecat.ai) Python backend, using STUN/TURN for NAT traversal.  
+2\. Pipecat resamples the audio to 16kHz PCM and applies Voice Activity Detection (VAD) to detect speech boundaries.  
+3\. The audio stream is forwarded to [NVIDIA RIVA](https://developer.nvidia.com/riva) ASR via \*\*gRPC\*\* (HTTP/2 \+ Protocol Buffers), which returns both interim and final transcripts in real time.  
+4\. The final transcript is passed to the LangGraph agent, which produces a text response.  
+5\. The response text is sent to RIVA TTS via gRPC, which streams back synthesised audio chunks.  
+6\. Pipecat relays the audio back to the browser over the WebRTC connection.
+
+The use of gRPC for the RIVA services is deliberate: its bidirectional streaming over HTTP/2 is significantly more efficient than REST for continuous audio data, contributing to the sub-100ms end-to-end latency of the pipeline.
 
 ## CI/CD and Evaluation pipelines
 
