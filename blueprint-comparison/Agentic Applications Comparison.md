@@ -301,9 +301,28 @@ While the IT self-service agent quickstart uses the OpenAI-compatible API expose
 | EMBEDDING MODELS (110M-400M Parameters) | \- | all-MiniLM-L6-v2 |
 | EVALUATION MODELS | \- | Llama 4 scout 16B w4a16 |
 
-# UI Channels and User Experience
+# Other Aspects
 
-# CI/CD and Evaluation pipelines
+## Deployment Environment
 
-# Tracing and Observability
+The Ambient Patient blueprint is designed to be deployed using Docker Compose, which is primarily designed for managing multi-container applications on a single host.  
+It is also quite difficult to configure for end-to-end operation when deployed on a Kubernetes cluster. For instance, [WebRTC](https://webrtc.org/) communication between the browser and the Kubernetes cluster requires a TURN server to support NAT traversal and relay. This approach was adopted, for instance, in [our fork of the Ambient Patient blueprint](https://github.com/RHEcosystemAppEng/ambient-patient), in which we extended support for deployment on an [OpenShift](https://www.redhat.com/en/technologies/cloud-computing/openshift) cluster.  
+On the other hand, the IT self-service agent was designed as a Kubernetes/OpenShift-native application. Everything is designed to be straightforward to deploy on container platforms.  
 
+## UI Channels and User Experience
+
+The Ambient Patient blueprint delivers a rich and immersive user experience, making extensive use of full-duplex protocols — WebSockets for text and WebRTC for audio. It provides two interfaces: a text-based one and a voice-based one that also plays responses as audio. The overall user experience is excellent.  
+The IT self-service agent does not expose a web interface, but it allows users to interact through different channels: Slack and email. This makes the application better suited for production environments, though potentially less suitable as a demo, since configuring an SMTP/IMAP email server or a Slack workspace takes some time.
+
+## CI/CD and Evaluation pipelines
+
+The Ambient Patient blueprint defines no CI/CD pipelines in its codebase, while the IT self-service agent provides GitOps-based pipelines to enable automatic testing on incoming pull requests and before new releases.  
+The IT self-service agent also incorporates a vLLM as a judge in the test loop, using [DeepEval](https://deepeval.com/).
+
+## Tracing and Observability
+
+The IT self-service agent provides enterprise-grade observability: OpenTelemetry integration, distributed tracing across all workloads, structured log management, component-specific performance metrics, and comprehensive evaluation frameworks. The Ambient Patient blueprint, by contrast, limits tracing to agent-level visibility via LangSmith, provides no further tracing integration, and relies on Docker stdout for logs.
+
+## Python Project Management
+
+The Ambient Patient blueprint manages dependencies with pip and a requirements.txt file, while the IT self-service agent makes extensive use of uv with pyproject.toml, enabling a more enterprise-grade approach to dependency management.  
