@@ -1,71 +1,85 @@
 # Dark NOC Quickstart: Tasks Needed to Get Started
 
-# Executive Summary
+## Executive Summary
 
-[Dark NOC POC](http://github.com/msugur/auto-darknoc) represents exactly the kind of AI-driven innovation our telco customers need. The concept is proven, autonomous AI remediation actually works, and it has full integration across Red Hat / IBM portfolio (RHOAI, OpenShift, AAP, ACM, Granite LLM, Kafka).  
-We would like to transform it into a production-quality Red Hat quickstart, trying to apply the same design patterns, principles and practices we’ve covered for instance in [Self-Service Agents quickstart](https://docs.redhat.com/en/learn/ai-quickstarts/rh-it-self-service-agent).   
-Moreover, since this quickstart is designed to support the adoption for Telco partners and customers, we would like to cover different Telco use cases, extending the original scope of the POC.  
-In the following you will find my recommendation about possible first / next steps. Please keep in mind that those would be based on my very personal experience, so they should be considered a starting point that will be fixed, improved and corrected by the team’s contributions and the business feedback.  
-All in all, my take is that business needs and product promotion goals are already very well covered by [Dark NOC POC](http://github.com/msugur/auto-darknoc), while the AI Engineering team could help in improving the overall maintainability of the project.
+The [Dark NOC POC](https://github.com/msugur/auto-darknoc) is a strong example of the kind of AI-driven innovation our telco customers need. The concept is proven, autonomous AI remediation works in practice, and it integrates across the Red Hat / IBM portfolio (RHOAI, OpenShift, AAP, ACM, Granite LLM, Kafka).
 
-# Recommended Practices
+We want to evolve it into a production-quality Red Hat quickstart, applying the same design patterns, principles, and practices we used for the [Self-Service Agents quickstart](https://docs.redhat.com/en/learn/ai-quickstarts/rh-it-self-service-agent).
 
-I suggest elevating the POC by decomposing it into discrete, independently testable modules, each with comprehensive test coverage and CI/CD, then composing into a maintainable, customer-ready system. This approach matches how we successfully delivered the IT in [Self-Service Agents quickstart](https://docs.redhat.com/en/learn/ai-quickstarts/rh-it-self-service-agent).
+Because this quickstart is intended to support adoption with telco partners and customers, we also want to cover additional telco use cases and extend the original POC scope.
 
-## Module Breakdown
+The sections below are my recommended first / next steps. They are based on my experience and should be treated as a starting point to refine with team input and business feedback.
 
-Modular extraction is built on a foundational software engineering principle: the Single Responsibility Principle (SRP): A module should have one, and only one, reason to change. In practice it means that each module does one thing well and has one clear purpose, changes to requirements affect only one module, while testing focuses on one responsibility at a time.  
-In general, we want to cut the responsibilities and the scopes of the modules to maximize the cohesion and minimize the coupling.  
-In my opinion this activity should be done by the entire team during some shared sessions.
+Overall, the business narrative and product promotion goals are already well served by the [Dark NOC POC](https://github.com/msugur/auto-darknoc). The AI Engineering team can add the most value by improving maintainability and engineering quality so the project can scale safely.
 
-## Module ownership
+## Recommended practices
 
-Once a module has been clearly defined in terms of scope, responsibilities and design by contract can be assigned to a member of the team that becomes the maintainer of the module. In any case a contribution should be reviewed by another member of the team even if it is done by the maintainer of the module. Usually the maintainer should be the contributor or the reviewer of its modules.
+I recommend elevating the POC by decomposing it into discrete, independently testable modules, each with strong automated testing and CI/CD, then composing them into a maintainable, customer-ready system. This matches how we delivered the IT-focused [Self-Service Agents quickstart](https://docs.redhat.com/en/learn/ai-quickstarts/rh-it-self-service-agent).
 
-## Module/Integration tests
+### Module breakdown
 
-We would like to introduce tests end-to-end scoped on each module. Those integration tests should try to cover as much as possible the source code. In this case it is very important to pay attention to the scope of the tests, unit tests scoped on a single class would be not useful and could limit the modification of the code. As a rule of thumb since each module should follow the design by contract principle, the test should use the level of API defined by the module contract.
+Modular extraction is grounded in a foundational software engineering principle: the Single Responsibility Principle (SRP): a module should have one, and only one, reason to change. In practice, each module should do one thing well with a clear purpose; requirement changes should map cleanly to specific modules; and testing should focus on one responsibility at a time.
 
-## CI/CD pipelines
+In general, we want to narrow module responsibilities and scopes to maximize cohesion and minimize coupling.
 
-All tests should be executed automatically every time a pull request is made or when we do a new release. The same pipelines should also contain some code lint and validation steps done by some automatic code check tools. Other pipelines can be optionally configured to build and publish new containers or to execute special evaluations overnight, see [GitOps defined for IT self service agent](https://github.com/rh-ai-quickstart/it-self-service-agent/actions) for instance.
+This work should be done collaboratively by the whole team in shared working sessions.
 
-## UV project management
+### Module ownership
 
-Python projects should be managed by [UV](https://github.com/astral-sh/uv), following all the best practices of the tool.
+Once a module’s scope, responsibilities, and contracts are clear, it can be assigned to a team member who becomes the module maintainer. Even then, every change should be reviewed by another team member, including contributions from the maintainer. Typically, the maintainer is either the primary author or the reviewer for changes in their module.
 
-## Incremental / Iterative approach
+### Module / integration tests
 
-The idea is to contribute to the project one step at a time, keeping the quality and the solidity very high at each iteration. We followed this principle when we developed the [Self-Service Agents quickstart](https://docs.redhat.com/en/learn/ai-quickstarts/rh-it-self-service-agent), for instance releasing a video at the end of each iteration in which all the members of the team described some areas of improvement in detail. 
+We should introduce end-to-end tests scoped to each module. These integration tests should aim to cover most of the module’s behavior through its public contract.
 
-## Daily standup meetings
+It is important to keep test scope aligned with the module boundary: tests that are overly tied to a single internal class can become brittle and discourage useful refactors. As a rule of thumb, if modules follow design-by-contract thinking, tests should exercise the module at the API level defined by that contract.
 
-I would follow the experience of [Self-Service Agents quickstart](https://docs.redhat.com/en/learn/ai-quickstarts/rh-it-self-service-agent) again, introducing a daily stand up bot message, plus having two meetings in presence periodically Monday or Tuesday, and Wednesday or Thursday at a time that is comfortable for all the team members.
+### CI/CD pipelines
 
-## Support more Telco use cases
+All tests should run automatically on every pull request and on every release. The same pipelines should include linting and static validation steps.
 
-The logs analysis could be extended to support different and more Telco AI use cases. We can collaborate with the Telco Ecosystem organization for instance to identify, support and cover more use cases. This phase should be done after the test coverages, in order to make any additions / changes to the code base safe with the respect of the pre-existing use cases.  
-Extensibility also requires manutenability, as proven again by the [Self-Service Agents quickstart](https://docs.redhat.com/en/learn/ai-quickstarts/rh-it-self-service-agent), in which we’re assisting in adding more functionalities these days.
+Additional pipelines can optionally build and publish container images or run heavier evaluations on a schedule (for example overnight). See the GitOps / automation setup used for the IT self-service agent: [GitHub Actions for IT self-service agent](https://github.com/rh-ai-quickstart/it-self-service-agent/actions).
 
-# Next Steps
+### UV project management
 
-## Project Understanding Step
+Python projects should be managed with [uv](https://github.com/astral-sh/uv), following the tool’s recommended practices.
 
-My suggestion for the first step would be to study in depth the [Dark NOC POC](http://github.com/msugur/auto-darknoc). So that all the members of the team could have a solid understanding of it in order to be proactive for the Module Breakdown phase.  
-It is good for instance also to try to deploy the current code base solutions and see all difficulties and constraints.
+### Incremental / iterative approach
 
-## Module Breakdown Step
+We should improve the project in small, reviewable steps, keeping quality high at each iteration. We followed this approach for the [Self-Service Agents quickstart](https://docs.redhat.com/en/learn/ai-quickstarts/rh-it-self-service-agent), including releasing a short video at the end of each iteration where team members called out concrete improvement areas in detail.
 
-In this phase the entire team will proceed in defining and extracting the modules according to the principles stated before. Once a module is defined it can be assigned to a module maintainer.
+### Daily standup meetings
 
-## Integration Test Coverage Step
+I would mirror the [Self-Service Agents quickstart](https://docs.redhat.com/en/learn/ai-quickstarts/rh-it-self-service-agent) operating model: a daily standup bot message, plus periodic in-person meetings (for example twice weekly on Monday or Tuesday, and Wednesday or Thursday) at a time that works across time zones.
 
-As mentioned above, once the modules are defined we want to define tests that cover most of the code and are automatically executed on CI/CD to verify the solidity of the further changes.
+### Support more telco use cases
 
-## Cover More Telco AI Use Cases Step
+Log analysis can be extended to support additional telco AI use cases. We can collaborate with the telco ecosystem organization to identify and prioritize them.
 
-In collaboration with people from Telco organizations, we’re going to identify, cover and support more Telco AI Use cases.
+This expansion should come after meaningful automated test coverage is in place, so changes remain safe for existing use cases.
 
-# Final considerations
+Extensibility depends on maintainability. The [Self-Service Agents quickstart](https://docs.redhat.com/en/learn/ai-quickstarts/rh-it-self-service-agent) is a good example: we are continuing to add functionality now that the engineering foundation supports it.
 
-I would like to stress the fact that this document has to be intended as a starting point to address the topics that are covered. I’m expecting to be reviewed, changed and several things will be added by the team and the business needs.
+## Next steps
+
+### Project understanding
+
+Start with a deep review of the [Dark NOC POC](https://github.com/msugur/auto-darknoc) so the whole team builds shared context before module breakdown.
+
+It is also valuable to deploy the current solution end-to-end and capture operational constraints, gaps, and rough edges early.
+
+### Module breakdown
+
+In this phase, the team defines and extracts modules using the principles above. Once a module is defined, assign a maintainer.
+
+### Integration test coverage
+
+After modules are defined, add integration tests that cover most behavior and run automatically in CI/CD to protect future changes.
+
+### Cover more telco AI use cases
+
+Working with telco ecosystem stakeholders, identify, design, and implement support for additional telco AI use cases.
+
+## Final considerations
+
+This document is intentionally a starting point. I expect it to be revised, expanded, and corrected based on team input and evolving business priorities.
